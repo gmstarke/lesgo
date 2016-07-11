@@ -34,7 +34,7 @@ set(READ_ENDIAN "DEFAULT")
 # Select a turbine model
 # USE_TURBINE: Actuator Disk Model without Rotation
 # USE_ATM: Actuator Line/Sector Model 
-set(USE_TURBINES false)
+set(USE_TURBINES true)
 set(USE_ATM false)
 
 # Select the data output
@@ -136,7 +136,7 @@ set (Sources cfl_util.f90 clocks.f90 convec.f90 derivatives.f90 divstress_uv.f90
      sgs_param.f90 sgs_stag_util.f90 sim_param.f90 stat_defs.f90 
      std_dynamic.f90 string_util.f90 test_filtermodule.f90 tridag_array.f90 
      types.f90 wallstress.f90 init_random_seed.f90
-     iwmles.f90)
+     iwmles.f90 jensen.f90 minimize.f90)
 
 if (USE_MPI)
     add_definitions(-DPPMPI)
