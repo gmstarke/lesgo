@@ -5,7 +5,7 @@ use types, only : rprec
 type, extends(Minimized) :: jensen_t
     integer :: N
     real(rprec) :: D, alpha, Ui, Pref, Pfarm
-    real(rprec), dimension(:), allocatable :: s, k, Ctp0
+    real(rprec), dimension(:), allocatable :: s, k, Ctp0, e, u
 contains
     procedure, public :: eval
     procedure, public :: run
@@ -17,20 +17,20 @@ end interface jensen_t
 
 contains
 
-function constructor(Ui, s, Ctp0, k, D, alpha, Pref) result(this)
+function constructor(Ui, s, Ctp0, k, D, alpha, Pref, i_e) result(this)
     use types, only : rprec
     implicit none
 
     type(jensen_t) :: this
-    real(rprec), dimension(:), intent(in) :: s, Ctp0, k
+    real(rprec), dimension(:), intent(in) :: s, Ctp0, k, i_e
     real(rprec), intent(in) :: Ui, D, alpha, Pref
-    real(rprec), dimension(:), allocatable :: a, du
-    integer :: i, j, N
 
     this%N = size(s)
     allocate(this%s(this%N))
     allocate(this%k(this%N))
     allocate(this%Ctp0(this%N))
+    allocate(this%e(this%N))
+    allocate(this%u(this%N))
 
     this%D = D
     this%alpha = alpha
@@ -39,6 +39,7 @@ function constructor(Ui, s, Ctp0, k, D, alpha, Pref) result(this)
     this%k = k
     this%Ctp0 = Ctp0
     this%Pref = Pref
+    this%e = i_e
 end function constructor
 
 subroutine eval(this, x, f, g)
@@ -54,19 +55,16 @@ subroutine eval(this, x, f, g)
     
     f = this%run(x)
     
-    jti = jensen_t(this%Ui, this%s, this%Ctp0, this%k, this%D, this%alpha, this%Pref)
+    jti = jensen_t(this%Ui, this%s, this%Ctp0, this%k, this%D, this%alpha,     &
+                   this%Pref, this%e)
     allocate(Ctp(this%N))
     do i = 1, this%N
         Ctp = x
         Ctp(i) = Ctp(i) + sqrt(epsilon(f))
         g(i) = jti%run(Ctp)
-!         write(*,*) Ctp
     end do
     
     g = (g - f) / sqrt(epsilon(f))
-!     write(*,*) f
-!     write(*,*) x
-!     write(*,*) g
 
 end subroutine eval
 
@@ -76,13 +74,11 @@ function run(this, Ctp) result(f)
     class(jensen_t), intent(inout) :: this
     real(rprec), dimension(:), intent(in) :: Ctp
     real(rprec) :: f
-    real(rprec), dimension(:), allocatable :: a, du, u, P
+    real(rprec), dimension(:), allocatable :: a, du, P
     integer :: i, j
-    type(jensen_t) :: jti, fi
     
     allocate(a(this%N))
     allocate(du(this%N))
-    allocate(u(this%N))
     allocate(P(this%N))
     a = Ctp / (4._rprec + Ctp)
     du = 0._rprec
@@ -95,8 +91,8 @@ function run(this, Ctp) result(f)
     end do
     
     du = sqrt(du)
-    u = this%Ui - du
-    P = Ctp * u**3
+    this%u = this%Ui - du
+    P = Ctp * (this%u + this%e)**3
     this%Pfarm = sum(P)
     f = (1._rprec - this%Pfarm / this%Pref)**2 + this%alpha * sum((Ctp - this%Ctp0)**2)
 

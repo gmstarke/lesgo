@@ -77,7 +77,12 @@ real(rprec), public :: alpha
 ! indicator function only includes values above this threshold
 real(rprec), public :: filter_cutoff    
 ! Number of timesteps between the output
-integer, public :: tbase            
+integer, public :: tbase
+! Wake model parameters
+logical, public :: use_wake_model
+real(rprec), public :: U_infty
+real(rprec), dimension(:), allocatable, public :: wm_k
+real(rprec), public :: wm_alpha
 
 ! The following are derived from the values above
 integer :: nloc             ! total number of turbines
@@ -91,6 +96,8 @@ real(rprec), dimension(:,:), allocatable :: theta2_arr
 real(rprec), dimension(:), allocatable :: theta2_time
 real(rprec), dimension(:,:), allocatable :: Ct_prime_arr
 real(rprec), dimension(:), allocatable :: Ct_prime_time
+real(rprec), dimension(:), allocatable :: P_ref_arr
+real(rprec), dimension(:), allocatable :: P_ref_time
 
 ! Input files
 character(*), parameter :: input_folder = 'input_turbines/'
@@ -98,6 +105,7 @@ character(*), parameter :: param_dat = path // input_folder // 'param.dat'
 character(*), parameter :: theta1_dat = path // input_folder // 'theta1.dat'
 character(*), parameter :: theta2_dat = path // input_folder // 'theta2.dat'
 character(*), parameter :: Ct_prime_dat = path // input_folder // 'Ct_prime.dat'
+character(*), parameter :: P_ref_dat = path // input_folder // 'P_ref.dat'
 
 ! Output files
 character(*), parameter :: output_folder = 'turbine/'
@@ -119,6 +127,9 @@ logical :: turbine_in_proc = .false.
 integer :: turbine_in_proc_cnt = 0
 logical :: buffer_logical
 #endif
+
+! Wake model variables
+real(rprec), dimension(:), allocatable :: uhat
 
 contains
 
@@ -153,6 +164,8 @@ nullify(wind_farm%turbine)
 allocate(wind_farm%turbine(nloc))
 allocate(turbine_in_proc_array(nproc-1))
 allocate(forcing_fid(nloc))
+allocate(uhat(num_x))
+uhat = U_infty
 turbine_in_proc_array = 0
 
 ! Create turbine directory
@@ -581,7 +594,7 @@ elseif (turbine_in_proc) then
 end if
 #endif
 
-!Coord==0 takes that info and calculates total disk force, then sends it back
+! Coord==0 takes that info and calculates total disk force, then sends it back
 if (coord == 0) then           
     !update epsilon for the new timestep (for cfl_dt)
     if (T_avg_dim > 0.) then
@@ -603,7 +616,10 @@ if (coord == 0) then
 
         !add this current value to the "running average" (first order filter)
         p_u_d_T = (1.-eps)*p_u_d_T + eps*p_u_d
-
+        
+        !Now compute the wake model to select the right Ct_prime's
+        if (use_wake_model) call wake_model
+        
         !calculate total thrust force for each turbine  (per unit mass)
         !force is normal to the surface (calc from u_d_T, normal to surface)
         !write force to array that will be transferred via MPI    
@@ -662,6 +678,57 @@ nullify(y,z)
 nullify(p_icp, p_jcp, p_kcp)
 
 end subroutine turbines_forcing
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+subroutine wake_model ()
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+use jensen_m
+use conjugate_gradient_class
+use functions, only : linear_interp
+implicit none
+
+type(ConjugateGradient) :: cg
+type(jensen_t) :: jens
+real(rprec), dimension(:), allocatable :: s, Ctp, Ctp0, e, u
+integer :: i, j
+real(rprec) :: P_ref
+
+character (*), parameter :: sub_name = mod_name // '.wake_model'
+
+allocate(s(num_x))
+allocate(Ctp(num_x))
+allocate(Ctp0(num_x))
+allocate(e(num_x))
+allocate(u(num_x))
+
+e = 0._rprec
+
+Ctp0 = Ct_prime
+u = 0._rprec
+do i = 1, num_x
+    j = (i-1)*num_y + 1
+    Ctp(i) = wind_farm%turbine(j)%Ct_prime
+    s(i) = wind_farm%turbine(j)%xloc * z_i
+    do j = 1, num_y
+        u(i) = u(i) - wind_farm%turbine((i-1)*num_y + j)%u_d_T**3 / num_y
+    end do
+    u(i) = u(i)**(1._rprec/3._rprec) * u_star
+end do
+e = u - uhat
+P_ref = linear_interp(P_ref_time, P_ref_arr, total_time_dim)
+
+jens = jensen_t(U_infty, s, Ctp, wm_k, dia_all * z_i, wm_alpha, P_ref, e)
+cg = ConjugateGradient(jens, 100, 0._rprec, 2._rprec)
+call cg%minimize(Ctp0, Ctp)
+
+uhat = jens%u
+do i = 1, num_x
+    do j = 1, num_y
+        wind_farm%turbine((i-1)*num_y + j)%Ct_prime = Ctp(i)
+    end do
+end do
+
+end subroutine wake_model
 
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 subroutine turbines_finalize ()
@@ -949,6 +1016,20 @@ if (dyn_Ct_prime) then
     fid = open_file_fid(Ct_prime_dat, 'rewind', 'formatted')
     do i = 1, num_t
         read(fid,*) Ct_prime_time(i), Ct_prime_arr(:,i)
+    end do
+end if
+
+! Read the P_ref input data
+if (use_wake_model) then
+    ! Count number of entries and allocate
+    num_t = count_lines(P_ref_dat)
+    allocate( P_ref_time(num_t) )
+    allocate( P_ref_arr(num_t) )
+
+    ! Read values from file
+    fid = open_file_fid(P_ref_dat, 'rewind', 'formatted')
+    do i = 1, num_t
+        read(fid,*) P_ref_time(i), P_ref_arr(i)
     end do
 end if
 

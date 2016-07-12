@@ -834,9 +834,12 @@ end subroutine  sgs_hist_block
 subroutine turbines_block()
 !++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 use turbines
+use string_util, only : split_string
 implicit none
 
 character(*), parameter :: block_name = 'TURBINES'
+integer :: i, n_k
+character(CHAR_BUFF_LENGTH), allocatable, dimension(:) :: k_str_vector
 
 do 
 
@@ -895,6 +898,22 @@ do
         read (buff(equal_pos+1:), *) filter_cutoff
      case ('TBASE')
         read (buff(equal_pos+1:), *) tbase
+        
+     case ('USE_WAKE_MODEL')
+         read (buff(equal_pos+1:), *) use_wake_model 
+     case ('U_INFTY')
+         read (buff(equal_pos+1:), *) U_infty
+     case ('WM_K')
+        call split_string( buff(equal_pos+1:), ",", n_k, k_str_vector )
+        if (n_k /= num_x) then
+            call error( sub_name, 'k must have num_x number of entries')
+        endif
+        allocate(wm_k(n_k))
+        do i = 1, n_k
+            read(k_str_vector(i), *) wm_k(i)
+        enddo
+     case ('WM_ALPHA')
+         read (buff(equal_pos+1:), *) wm_alpha
 
      case default
 
