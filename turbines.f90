@@ -607,8 +607,6 @@ if (coord == 0) then
         !set pointers
         p_u_d => wind_farm%turbine(s)%u_d
         p_u_d_T => wind_farm%turbine(s)%u_d_T
-        p_f_n => wind_farm%turbine(s)%f_n
-        p_Ct_prime => wind_farm%turbine(s)%Ct_prime
         
         !volume correction:
         !since sum of ind is turbine volume/(dx*dy*dz) (not exactly 1.)
@@ -616,9 +614,17 @@ if (coord == 0) then
 
         !add this current value to the "running average" (first order filter)
         p_u_d_T = (1.-eps)*p_u_d_T + eps*p_u_d
-        
-        !Now compute the wake model to select the right Ct_prime's
-        if (use_wake_model) call wake_model
+    end do
+    
+    !Now compute the wake model to select the right Ct_prime's
+    if (use_wake_model) call wake_model
+    
+    do s=1,nloc
+        !set pointers
+        p_u_d => wind_farm%turbine(s)%u_d
+        p_u_d_T => wind_farm%turbine(s)%u_d_T
+        p_f_n => wind_farm%turbine(s)%f_n
+        p_Ct_prime => wind_farm%turbine(s)%Ct_prime
         
         !calculate total thrust force for each turbine  (per unit mass)
         !force is normal to the surface (calc from u_d_T, normal to surface)
