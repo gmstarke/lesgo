@@ -245,31 +245,31 @@ subroutine search(this, x, f, g, s, stp, o_numFunEval)
         ! print a warning to std output
         if ((this%bracketed .and. (stp <= this%curMinStep .or. stp >= this%curMaxStep))  &
         .or. .not.take_step_success) then
-            call mesg(sub_name, 'Rounding errors prevent further progress. There may'   &
-             // ' not be a step which satisfies the sufficient decrease and curvature'   &
-             // ' conditions. Tolerances may be too small')
+!             call mesg(sub_name, 'Rounding errors prevent further progress. There may'   &
+!              // ' not be a step which satisfies the sufficient decrease and curvature'   &
+!              // ' conditions. Tolerances may be too small')
             o_numFunEval = numFunEval
             return
         end if
         if (stp == this%maxStep .and. f <= ftest1 .and. dg < ddtest) then
-            call mesg(sub_name,'The step is at the upper bound.')
+!             call mesg(sub_name,'The step is at the upper bound.')
             o_numFunEval = numFunEval
             return
         end if
         if (stp == this%minStep .and. (f > ftest1 .or. dg >= ddtest)) then
-            call mesg(sub_name,'The step is at the lower bound.')
+!             call mesg(sub_name,'The step is at the lower bound.')
             o_numFunEval = numFunEval
             return
         end if
         if (numFunEval >= this%maxFunEval) then
-            call mesg(sub_name,'Maximum number of function evaluations has been reached.')
+!             call mesg(sub_name,'Maximum number of function evaluations has been reached.')
             o_numFunEval = numFunEval
             return
         end if
         if (this%bracketed .and.                                                         &
          this%curMaxStep - this%curMinStep <= this%xtol * this%curMaxStep) then
-            call mesg(sub_name,'Relative width of the interval of uncertainty has '     &
-             // 'reached tolerance.')
+!             call mesg(sub_name,'Relative width of the interval of uncertainty has '     &
+!              // 'reached tolerance.')
             o_numFunEval = numFunEval
             return
         end if
@@ -612,10 +612,10 @@ subroutine minimize(this, i_x, o_x)
             
             ! Evaluate minimization at current point
             call this%mini%eval(this%x, this%f, this%g)
-            
-            ! Print result
-            write(*,*) 'Minimum f = ',this%f, 'found after ', i, ' iterations.'
-            
+!             
+!             ! Print result
+!             write(*,*) 'Minimum f = ',this%f, 'found after ', i, ' iterations.'
+!             
             return
         else if (this%f > this%fp) then
             ! Reset to previous point
@@ -628,10 +628,10 @@ subroutine minimize(this, i_x, o_x)
             
             ! Evaluate minimization at current point
             call this%mini%eval(this%x, this%f, this%g)
-            
-            ! Print result
-            write(*,*) 'Value increased after ', i,                            &
-                ' iterations. Minimum function value is f = ', this%f
+!             
+!             ! Print result
+!             write(*,*) 'Value increased after ', i,                            &
+!                 ' iterations. Minimum function value is f = ', this%f
             return
         end if
 
@@ -653,10 +653,10 @@ subroutine minimize(this, i_x, o_x)
     
     ! Set output if present
     if ( present(o_x) ) o_x = this%x
-    
-    ! Print result
-    write(*,*) 'Maximum number of iterations reached. ',                       &
-        'Minimum function value is f = ', this%f
+!     
+!     ! Print result
+!     write(*,*) 'Maximum number of iterations reached. ',                       &
+!         'Minimum function value is f = ', this%f
 end subroutine minimize
 
 end module conjugate_gradient_class
