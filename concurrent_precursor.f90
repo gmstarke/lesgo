@@ -152,8 +152,8 @@ elseif( color == RED ) then
    
    ! Should end up as nx + 1 (this eventually gets wrapped) 
    iend_p = nx + 1
-   ! Plateau location not used since no fringe treatment on the RED domain, but setting so it is at
-   ! least initialized.
+   ! Plateau location not used since no fringe treatment on the RED domain, but 
+   ! setting so it is at least initialized.
    iplateau_p = iend_p
    ! Set istart based on the size of the sample block
    istart_p = iend_p - nx_p
@@ -187,9 +187,10 @@ subroutine synchronize_cps()
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 use types, only : rprec
 use messages
-use param, only : ny, nz
+use param, only : ny, nz, dy, L_y, pi, total_time_dim
 use param, only : coord, rank_of_coord, status, ierr, MPI_RPREC
 use sim_param, only : u,v,w
+use grid_m
 implicit none
 
 character (*), parameter :: sub_name = mod_name // '.synchronize_cps'
@@ -198,7 +199,11 @@ integer, pointer :: nx_p
 integer, pointer, dimension(:) :: iwrap_p
 real(rprec), pointer, dimension(:,:,:) :: u_p, v_p, w_p
 
-integer :: sendsize, recvsize
+real(rprec), dimension(nz) :: ubar
+real(rprec), dimension(ny) :: gamma_y
+real(rprec) :: sigma, gamma_t, omega
+
+integer :: sendsize, recvsize, i, k
 
 nullify( u_p, v_p, w_p )
 nullify( nx_p, iwrap_p )
@@ -215,19 +220,36 @@ recvsize = sendsize
 if( color == BLUE ) then
 
    ! Recieve sampled velocities from upstream (RED)
-   call mpi_recv( u_p(1,1,1) , recvsize, MPI_RPREC, &
+   call mpi_recv( u_p(1,1,1), recvsize, MPI_RPREC, &
         rank_of_coord(coord), 1, interComm, status, ierr)
-   call mpi_recv( v_p(1,1,1) , recvsize, MPI_RPREC, &
+   call mpi_recv( v_p(1,1,1), recvsize, MPI_RPREC, &
         rank_of_coord(coord), 2, interComm, status, ierr)
-   call mpi_recv( w_p(1,1,1) , recvsize, MPI_RPREC, &
+   call mpi_recv( w_p(1,1,1), recvsize, MPI_RPREC, &
         rank_of_coord(coord), 3, interComm, status, ierr)
    
 elseif( color == RED ) then
 
-   ! Sample velocity and copy to buffers         
-   u_p(:,:,:) = u(iwrap_p(:),1:ny,1:nz)
-   v_p(:,:,:) = v(iwrap_p(:),1:ny,1:nz)
-   w_p(:,:,:) = w(iwrap_p(:),1:ny,1:nz)
+   ! Average velocity over x-y planes
+   do i = 1, nz
+      ubar(i) = sum(u(:,:,i))
+   end do
+   
+   ! Compute weighting function gamma_y
+   sigma = 2._rprec * dy
+   gamma_y = erf((grid%y - L_y/4._rprec)/sigma/sqrt(2._rprec)) &
+             - erf((grid%y - 3._rprec*L_y/4._rprec)/sigma/sqrt(2._rprec)) &
+             - 1._rprec
+   omega = 300._rprec
+   gamma_t = 0.3_rprec * sin(2 * pi * total_time_dim / omega)
+   
+   ! Sample velocity and copy to buffers
+   do i = 1, nx_p
+      do k = 1, nz
+         u_p(i,:,k) = u(iwrap_p(i),1:ny,k) + gamma_t*gamma_y*ubar(k)
+         v_p(i,:,k) = v(iwrap_p(i),1:ny,k)
+         w_p(i,:,k) = w(iwrap_p(i),1:ny,k)
+      end do
+   end do
 
    ! Send sampled velocities to downstream domain (BLUE)
    call mpi_send( u_p(1,1,1), sendsize, MPI_RPREC, &
