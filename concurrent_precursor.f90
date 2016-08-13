@@ -175,6 +175,21 @@ do i = istart_p + 1, iend_p
    vel_sample_t % iwrap(index) = modulo( i - 1, nx ) + 1
 enddo
 
+! Read the Ct_prime input data
+if (modulate_outflow) then
+    ! Count number of entries and allocate
+    num_t = count_lines(path // 'modulation.dat')
+    allocate( mod_time(num_t) )
+    allocate( mod_val(num_t) )
+
+    ! Read values from file
+    fid = open_file_fid(path // 'modulation.dat', 'rewind', 'formatted')
+    do i = 1, num_t
+        read(fid,*) mod_time(i), mod_val(i)
+    end do
+    close(fid)
+end if
+
 ! Allocate the sample block
 allocate( vel_sample_t % u( nx_p, ny, nz ) )
 allocate( vel_sample_t % v( nx_p, ny, nz ) )
@@ -325,22 +340,6 @@ do k=1,nz
 
    enddo
 enddo
-
-! Read the Ct_prime input data
-if (modulate_outflow) then
-    ! Count number of entries and allocate
-    num_t = count_lines(path // 'modulation.dat')
-    allocate( mod_time(num_t) )
-    allocate( mod_val(num_t) )
-
-    ! Read values from file
-    fid = open_file_fid(path // 'modulation.dat', 'rewind', 'formatted')
-    do i = 1, num_t
-        read(fid,*) mod_time(i), mod_val(i)
-    end do
-    close(fid)
-end if
-
 
 nullify( u_p, v_p, w_p )
 nullify( istart_p, iwrap_p )
