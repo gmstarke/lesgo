@@ -106,7 +106,7 @@ end subroutine create_mpi_comms_cps
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 subroutine initialize_cps()
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-use param, only : nx, ny, nz
+use param, only : nx, ny, nz, path, modulate_outflow
 use param, only : coord, rank_of_coord, status, ierr
 use messages
 use mpi
@@ -302,7 +302,7 @@ subroutine inflow_cond_cps ()
 !  enforced by direct modulation on the velocity in the fringe region.
 !
 use types, only : rprec
-use param, only : path, nx, ny, nz, modulate_outflow
+use param, only : nx, ny, nz
 use sim_param, only : u, v, w
 use messages, only : error
 use open_file_fid_mod
