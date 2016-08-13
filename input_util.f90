@@ -454,6 +454,10 @@ do
         read (buff(equal_pos+1:), *) fringe_region_len
      case ('INFLOW_VELOCITY')
         read (buff(equal_pos+1:), *) inflow_velocity
+     case ('MODULATE_OUTFLOW')
+        read (buff(equal_pos+1:), *) modulate_outflow
+     case ('MODULATION_MAGNITUDE')
+        read (buff(equal_pos+1:), *) modulation_magnitude
      case ('USE_MEAN_P_FORCE')
         read (buff(equal_pos+1:), *) use_mean_p_force
      case ('EVAL_MEAN_P_FORCE')

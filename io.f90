@@ -589,7 +589,8 @@ subroutine inst_write(itype)
 ! If additional instantenous values are
 ! desired to be written, they should be done so using this subroutine.
 !
-use functions, only : linear_interp, trilinear_interp, interp_to_uv_grid
+use functions, only : trilinear_interp, interp_to_uv_grid
+use interp, only : linear_interp
 use param, only : point_nloc, point_loc
 use param, only : xplane_nloc, xplane_loc
 use param, only : yplane_nloc, yplane_loc

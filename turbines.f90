@@ -470,7 +470,8 @@ subroutine turbines_forcing()
 ! This subroutine applies the drag-disk forcing
 ! 
 use sim_param, only : u,v,w, fxa,fya,fza
-use functions, only : linear_interp, interp_to_uv_grid
+use functions, only : interp_to_uv_grid
+use interp, only : linear_interp
 implicit none
 
 character (*), parameter :: sub_name = mod_name // '.turbines_forcing'

@@ -54,6 +54,9 @@ type(vel_sample_type), target :: vel_sample_t
 ! Weights used in fringe region
 real(rprec), allocatable, dimension(:) :: alpha, beta
 
+! Modulation values
+real(rprec), allocatable, dimension(:) :: mod_time, mod_val
+
 contains
 
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -187,10 +190,11 @@ subroutine synchronize_cps()
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 use types, only : rprec
 use messages
-use param, only : ny, nz, dy, L_y, pi, total_time_dim
+use param, only : nx, ny, nz, dy, L_y, pi, total_time_dim, modulate_outflow
 use param, only : coord, rank_of_coord, status, ierr, MPI_RPREC
 use sim_param, only : u,v,w
 use grid_m
+use interp
 implicit none
 
 character (*), parameter :: sub_name = mod_name // '.synchronize_cps'
@@ -201,7 +205,7 @@ real(rprec), pointer, dimension(:,:,:) :: u_p, v_p, w_p
 
 real(rprec), dimension(nz) :: ubar
 real(rprec), dimension(ny) :: gamma_y
-real(rprec) :: sigma, gamma_t, omega
+real(rprec) :: sigma, gamma_t
 
 integer :: sendsize, recvsize, i, k
 
@@ -231,7 +235,7 @@ elseif( color == RED ) then
 
    ! Average velocity over x-y planes
    do i = 1, nz
-      ubar(i) = sum(u(:,:,i))
+      ubar(i) = sum(u(:,:,i)) / nx / ny
    end do
    
    ! Compute weighting function gamma_y
@@ -239,8 +243,11 @@ elseif( color == RED ) then
    gamma_y = erf((grid%y - L_y/4._rprec)/sigma/sqrt(2._rprec)) &
              - erf((grid%y - 3._rprec*L_y/4._rprec)/sigma/sqrt(2._rprec)) &
              - 1._rprec
-   omega = 300._rprec
-   gamma_t = 0.3_rprec * sin(2 * pi * total_time_dim / omega)
+   if (modulate_outflow) then
+      gamma_t = linear_interp(mod_time, mod_val, total_time_dim)
+   else
+      gamma_t = 0._rprec
+   end if
    
    ! Sample velocity and copy to buffers
    do i = 1, nx_p
@@ -280,18 +287,21 @@ subroutine inflow_cond_cps ()
 !  enforced by direct modulation on the velocity in the fringe region.
 !
 use types, only : rprec
-use param, only : nx, ny, nz
+use param, only : path, nx, ny, nz, modulate_outflow
 use sim_param, only : u, v, w
 use messages, only : error
+use open_file_fid_mod
 implicit none
 
 character (*), parameter :: sub_name = 'inflow_cond_cps'
 
-integer :: j,k 
+integer :: i, j, k , fid
 integer :: istart_wrap
 
 integer, pointer :: istart_p
 integer, pointer, dimension(:) :: iwrap_p
+
+integer :: num_t
 
 real(rprec), pointer, dimension(:,:,:) :: u_p, v_p, w_p
 
@@ -316,10 +326,65 @@ do k=1,nz
    enddo
 enddo
 
+! Read the Ct_prime input data
+if (modulate_outflow) then
+    ! Count number of entries and allocate
+    num_t = count_lines(path // 'modulation.dat')
+    allocate( mod_time(num_t) )
+    allocate( mod_val(num_t) )
+
+    ! Read values from file
+    fid = open_file_fid(path // 'modulation.dat', 'rewind', 'formatted')
+    do i = 1, num_t
+        read(fid,*) mod_time(i), mod_val(i)
+    end do
+    close(fid)
+end if
+
+
 nullify( u_p, v_p, w_p )
 nullify( istart_p, iwrap_p )
 
 return
 end subroutine inflow_cond_cps
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function count_lines(fname) result(N)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+!
+! This function counts the number of lines in a file
+!
+use open_file_fid_mod
+use messages
+use param, only : CHAR_BUFF_LENGTH
+implicit none
+character(*), intent(in) :: fname
+logical :: exst
+integer :: fid, ios
+integer :: N
+
+character(*), parameter :: sub_name = mod_name // '.count_lines'
+
+! Check if file exists and open
+inquire (file = trim(fname), exist = exst)
+if (.not. exst) then
+    call error (sub_name, 'file ' // trim(fname) // 'does not exist')
+end if
+fid = open_file_fid(trim(fname), 'rewind', 'formatted')
+
+! count number of lines and close
+ios = 0
+N = 0
+do 
+    read(fid, *, IOstat = ios)
+    if (ios /= 0) exit
+    N = N + 1
+end do
+
+! Close file
+close(fid)
+
+end function count_lines
+
 
 end module concurrent_precursor

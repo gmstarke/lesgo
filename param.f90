@@ -193,14 +193,18 @@ module param
   ! prescribed inflow:   
   logical :: inflow = .false.
   ! if inflow is true the following should be set:
-    ! position of right end of fringe region, as a fraction of L_x
-    real(rprec) :: fringe_region_end  = 1.0_rprec
-    ! length of fringe region as a fraction of L_x
-    real(rprec) :: fringe_region_len = 0.125_rprec
+  ! position of right end of fringe region, as a fraction of L_x
+  real(rprec) :: fringe_region_end  = 1.0_rprec
+  ! length of fringe region as a fraction of L_x
+  real(rprec) :: fringe_region_len = 0.125_rprec
 
-    ! Use uniform inflow instead of concurrent precursor inflow
-    logical :: uniform_inflow = .false.
-      real(rprec) :: inflow_velocity = 1.0_rprec
+  ! Use uniform inflow instead of concurrent precursor inflow
+  logical :: uniform_inflow = .false.
+  real(rprec) :: inflow_velocity = 1.0_rprec
+  
+  ! Only used in precursor
+  logical :: modulate_outflow = .false.
+  real(rprec) :: modulation_magnitude = 0._rprec
 
   ! if true, imposes a pressure gradient in the x-direction to force the flow
   logical :: use_mean_p_force = .true.
