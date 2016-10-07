@@ -26,6 +26,7 @@ public
 logical :: sim_param_initialized = .false.
 
 real (rprec), dimension (:, :, :), allocatable :: u, v, w
+real (rprec), dimension (:, :, :), allocatable :: uhat, uhat_prev
 real (rprec), dimension (:, :, :), allocatable :: dudx, dudy, dudz,  &
                                                   dvdx, dvdy, dvdz,  &
                                                   dwdx, dwdy, dwdz,  &
@@ -55,6 +56,8 @@ subroutine sim_param_init ()
 implicit none
 
 allocate ( u(ld, ny, lbz:nz) ); u = 0.0_rprec
+allocate ( uhat(ld, ny, lbz:nz) ); uhat = 0.0_rprec
+allocate ( uhat_prev(ld, ny, lbz:nz) ); uhat_prev = 0.0_rprec
 allocate ( v(ld, ny, lbz:nz) ); v = 0.0_rprec
 allocate ( w(ld, ny, lbz:nz) ); w = 0.0_rprec
 allocate( dudx(ld, ny, lbz:nz) ); dudx = 0.0_rprec

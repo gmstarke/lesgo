@@ -449,7 +449,12 @@ use param, only : xplane_calc, xplane_nstart, xplane_nend, xplane_nskip
 use param, only : yplane_calc, yplane_nstart, yplane_nend, yplane_nskip
 use param, only : zplane_calc, zplane_nstart, zplane_nend, zplane_nskip
 use stat_defs, only : tavg_initialized,tavg_dt
+use param, only : lbz, nz
+use sim_param, only : u, uhat, uhat_prev
+use fft
 implicit none
+
+integer :: k
 
 ! Determine if we are to checkpoint intermediate times
 if( checkpoint_data ) then
@@ -458,6 +463,13 @@ if( checkpoint_data ) then
 !   if ( jt_total < nsteps .and. modulo (jt_total, checkpoint_nskip) == 0) call checkpoint()
    if ( modulo (jt_total, checkpoint_nskip) == 0) call checkpoint()
 endif 
+
+! Always compute uhat and save previous value
+uhat_prev = uhat
+uhat = u
+do k = lbz, nz
+    call dfftw_execute_dft_r2c(forw, uhat(:,:,k), uhat(:,:,k))
+end do
 
 !  Determine if time summations are to be calculated
 if (tavg_calc) then
@@ -1353,9 +1365,7 @@ use sgs_param
 #endif
 use param, only : nx,ny,nz,lbz,jzmax
 use sim_param, only : u, v, w
-#ifdef PPMPI
 use sim_param, only : txx, txy, tyy, txz, tyz, tzz
-#endif
 #ifdef PPTURBINES
 use sim_param, only : fxa, fya, fza
 #endif
