@@ -70,7 +70,6 @@ type tavg_t
   real(rprec) :: txx, tyy, tzz, txy, txz, tyz
   real(rprec) :: fx, fy, fz
   real(rprec) :: cs_opt2  
-  real(rprec) :: cv_n, cv_d
 end type tavg_t
   
 !  Sums performed over time (for subgrid variables)
@@ -331,8 +330,6 @@ c % fx = a % fx + b % fx
 c % fy = a % fy + b % fy
 c % fz = a % fz + b % fz
 c % cs_opt2 = a % cs_opt2 + b % cs_opt2
-c % cv_n = a % cv_n + b % cv_n
-c % cv_d = a % cv_d + b % cv_d
 
 return
 end function tavg_add
@@ -366,8 +363,6 @@ c % fx = a % fx - b % fx
 c % fy = a % fy - b % fy
 c % fz = a % fz - b % fz
 c % cs_opt2 = a % cs_opt2 - b % cs_opt2
-c % cv_n = a % cv_n - b % cv_n
-c % cv_d = a % cv_d - b % cv_d
 
 return
 end function tavg_sub
@@ -404,8 +399,6 @@ c % fx = a % fx + b
 c % fy = a % fy + b
 c % fz = a % fz + b
 c % cs_opt2 = a % cs_opt2 + b
-c % cv_n = a % cv_n + b
-c % cv_d = a % cv_d + b
 
 return
 end function tavg_scalar_add
@@ -485,8 +478,6 @@ c % fx = a % fx / b
 c % fy = a % fy / b
 c % fz = a % fz / b
 c % cs_opt2 = a % cs_opt2 / b
-c % cv_n = a % cv_n / b
-c % cv_d = a % cv_d / b
 
 return
 end function tavg_scalar_div
@@ -520,8 +511,6 @@ c % fx = a % fx * b % fx
 c % fy = a % fy * b % fy
 c % fz = a % fz * b % fz
 c % cs_opt2 = a % cs_opt2 * b % cs_opt2
-c % cv_n = a % cv_n * b % cv_n
-c % cv_d = a % cv_d * b % cv_d
 
 return
 end function tavg_mul
@@ -558,8 +547,6 @@ c % fx = a % fx * b
 c % fy = a % fy * b
 c % fz = a % fz * b
 c % cs_opt2 = a % cs_opt2 * b
-c % cv_n = a % cv_n * b
-c % cv_d = a % cv_d * b
 
 return
 end function tavg_scalar_mul
