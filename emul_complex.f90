@@ -43,6 +43,8 @@ private
 public :: operator( .MUL. ), &
      operator( .MULI. ), &
      operator( .MULR. )
+     
+public :: conjugate, magnitude, multiply, real_part, imaginary_part
 
 !///////////////////////////////////////
 !/// OPERATORS                       ///
@@ -293,5 +295,125 @@ enddo
 return
 
 end function mul_real_complex_real_2D
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function conjugate(c) result(cstar)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+real(rprec), dimension(:,:) :: c
+real(rprec), dimension(:,:), allocatable :: cstar
+integer :: nx, ny, i
+
+if (mod(size(c,1),2) /= 0) then
+    write(*,*) 'c is an invalid complex array'
+end if
+
+nx = size(c,1)/2
+ny = size(c,2)
+
+allocate( cstar(2*nx, ny) )
+
+cstar = c
+do i = 1, nx
+    cstar(2*i,:) = -cstar(2*i,:)
+end do
+
+end function conjugate
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function magnitude(c) result(c_mag)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+real(rprec), dimension(:,:) :: c
+real(rprec), dimension(:,:), allocatable :: c_mag
+integer :: nx, ny, i, j
+
+if (mod(size(c,1),2) /= 0) then
+    write(*,*) 'c is an invalid complex array'
+end if
+
+nx = size(c,1)/2
+ny = size(c,2)
+
+allocate( c_mag(nx, ny) )
+
+do i = 1, nx
+    do j = 1, ny
+        c_mag(i,j) = sqrt(c(2*i-1,j)**2 + c(2*i,j)**2)
+    end do
+end do
+
+end function magnitude
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function multiply(c1, c2) result(c3)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+real(rprec), dimension(:, :) :: c1, c2
+real(rprec), dimension(:, :), allocatable :: c3
+integer :: nx, ny, i, j, ir, ic
+
+if (size(c1,1) /= size(c2,1) .OR. size(c1,2) /= size(c2,2) ) then
+    write(*,*) 'c1 and c2 must be the same size'
+end if
+
+if (mod(size(c1,1),2) /= 0) then
+    write(*,*) 'c is an invalid complex array'
+end if
+
+nx = size(c1,1)/2
+ny = size(c1,2)
+
+allocate( c3(2*nx, ny) )
+
+do i = 1, nx
+    do j = 1, ny
+        ir = 2*i-1
+        ic = 2*i
+        
+        c3(ir,j) = c1(ir,j)*c2(ir,j) - c1(ic,j)*c2(ic,j)
+        c3(ic,j) = c1(ir,j)*c2(ic,j) + c1(ic,j)*c2(ir,j)
+    end do
+end do
+
+end function multiply
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function real_part(c) result(r)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+real(rprec), dimension(:, :) :: c
+real(rprec), dimension(:, :), allocatable :: r
+integer :: nx, ny
+
+if (mod(size(c,1),2) /= 0) then
+    write(*,*) 'c is an invalid complex array'
+end if
+
+nx = size(c,1)/2
+ny = size(c,2)
+
+allocate( r(nx, ny) )
+
+r = c(1:2:nx,:)
+
+end function real_part
+
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+function imaginary_part(c) result(i)
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+real(rprec), dimension(:, :) :: c
+real(rprec), dimension(:, :), allocatable :: i
+integer :: nx, ny
+
+if (mod(size(c,1),2) /= 0) then
+    write(*,*) 'c is an invalid complex array'
+end if
+
+nx = size(c,1)/2
+ny = size(c,2)
+
+allocate( i(nx, ny) )
+
+i = c(2:2:nx,:)
+
+end function imaginary_part
+
 
 end module emul_complex

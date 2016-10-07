@@ -49,6 +49,9 @@ public jt_total, openfiles, energy, output_loop, output_final, output_init, writ
 ! Where to end with nz index.
 integer :: nz_end
 
+! Convective velocities numerator and denominator
+real(rprec), dimension(:,:,:), allocatable :: cv_n, cv_d
+
 contains
 
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -449,7 +452,7 @@ use param, only : xplane_calc, xplane_nstart, xplane_nend, xplane_nskip
 use param, only : yplane_calc, yplane_nstart, yplane_nend, yplane_nskip
 use param, only : zplane_calc, zplane_nstart, zplane_nend, zplane_nskip
 use stat_defs, only : tavg_initialized,tavg_dt
-use param, only : lbz, nz
+use param, only : lbz, nx, ny, nz
 use sim_param, only : u, uhat, uhat_prev
 use fft
 implicit none
@@ -466,7 +469,7 @@ endif
 
 ! Always compute uhat and save previous value
 uhat_prev = uhat
-uhat = u
+uhat = u / nx / ny
 do k = lbz, nz
     call dfftw_execute_dft_r2c(forw, uhat(:,:,k), uhat(:,:,k))
 end do
@@ -1274,7 +1277,7 @@ subroutine tavg_init()
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 !  Load tavg.out files
 use messages
-use param, only : read_endian
+use param, only : read_endian, lh
 use stat_defs, only : tavg, tavg_total_time, tavg_dt, tavg_initialized
 use stat_defs, only : operator(.MUL.)
 #ifdef PPOUTPUT_EXTRA
@@ -1292,6 +1295,11 @@ character (*), parameter :: MPI_suffix = '.c'
 character (128) :: fname
 
 logical :: exst
+
+allocate(cv_n(ld, ny, lbz:nz))
+allocate(cv_d(lh, ny, lbz:nz))
+cv_n = 0._rprec
+cv_d = 0._rprec
 
 fname = ftavg_in
 #ifdef PPMPI
@@ -1314,6 +1322,8 @@ else
 open(1, file=fname, action='read', position='rewind', form='unformatted', convert=read_endian)
 read(1) tavg_total_time
 read(1) tavg
+read(1) cv_n
+read(1) cv_d
 close(1)
 
 endif
@@ -1370,6 +1380,9 @@ use sim_param, only : txx, txy, tyy, txz, tyz, tzz
 use sim_param, only : fxa, fya, fza
 #endif
 use functions, only : interp_to_uv_grid
+use emul_complex
+use sim_param, only : uhat, uhat_prev
+use param, only : dt
 
 implicit none
 
@@ -1380,6 +1393,12 @@ real(rprec), allocatable, dimension(:,:,:) :: w_uv
 allocate(w_uv(nx,ny,lbz:nz))
 
 w_uv(1:nx,1:ny,lbz:nz)= interp_to_uv_grid(w(1:nx,1:ny,lbz:nz), lbz )
+
+do k = lbz,nz
+    cv_n(:,:,k) = cv_n(:,:,k) + conjugate(uhat(:,:,k)) * &
+        (uhat(:,:,k)-uhat_prev(:,:,k)) / dt * tavg_dt
+    cv_d(:,:,k) = cv_d(:,:,k) + magnitude(uhat(:,:,k))**2 * tavg_dt
+end do
 
 do k=lbz,jzmax     !! lbz = 0 for mpi runs, otherwise lbz = 1  
   do j=1,ny
@@ -1462,11 +1481,12 @@ use param, only : write_endian
 #ifdef PPOUTPUT_EXTRA
 use stat_defs, only : tavg_sgs, tavg_total_time_sgs
 #endif
-use param, only : ny,nz
+use param, only : ny,nz,lh
 #ifdef PPMPI
 use mpi_defs, only : mpi_sync_real_array,MPI_SYNC_DOWNUP
 use param, only : ierr,comm
 #endif
+use emul_complex
 
 implicit none
 
@@ -1474,12 +1494,15 @@ implicit none
 character(64) :: bin_ext
 #endif
 
-character(64) :: fname_vel, fname_velw, fname_vel2, fname_tau, fname_f, fname_rs, fname_cs
+character(64) :: fname_vel, fname_velw, fname_vel2, fname_tau, fname_f, fname_rs, fname_cs, fname_cv
 
 integer :: i,j,k
 
 real(rprec), pointer, dimension(:) :: x,y,z,zw
 
+real(rprec), dimension(:,:,:), allocatable :: cv
+
+allocate(cv(lh,ny,lbz:nz))
 nullify(x,y,z,zw)
 
 x => grid % x
@@ -1497,6 +1520,7 @@ fname_tau = path // 'output/tau_avg'
 fname_f = path // 'output/force_avg'
 fname_rs = path // 'output/rs'
 fname_cs = path // 'output/cs_opt2'
+fname_cv = path // 'output/cv'
 
 ! CGNS
 #ifdef PPCGNS
@@ -1522,6 +1546,7 @@ call string_concat(fname_tau, bin_ext)
 call string_concat(fname_f, bin_ext)
 call string_concat(fname_rs, bin_ext)
 call string_concat(fname_cs, bin_ext)
+call string_concat(fname_cs, bin_ext)
 #endif
 
 ! Final checkpoint all restart data
@@ -1540,6 +1565,8 @@ do k=jzmin,jzmax
     enddo
   enddo
 enddo
+cv_n = cv_n / tavg_total_time
+cv_d = cv_d / tavg_total_time
 
 #ifdef PPOUTPUT_EXTRA
 do k=1,jzmax
@@ -1568,10 +1595,17 @@ call mpi_sync_real_array( tavg(1:nx,1:ny,lbz:nz)%vw, 0, MPI_SYNC_DOWNUP )
 call mpi_sync_real_array( tavg(1:nx,1:ny,lbz:nz)%uv, 0, MPI_SYNC_DOWNUP )
 call mpi_sync_real_array( tavg(1:nx,1:ny,lbz:nz)%fx, 0, MPI_SYNC_DOWNUP )
 call mpi_sync_real_array( tavg(1:nx,1:ny,lbz:nz)%cs_opt2, 0, MPI_SYNC_DOWNUP )
+call mpi_sync_real_array( cv_n(1:nx,1:ny,lbz:nz), 0, MPI_SYNC_DOWNUP )
+call mpi_sync_real_array( cv_d(1:nx,1:ny,lbz:nz), 0, MPI_SYNC_DOWNUP )
 #ifdef PPOUTPUT_EXTRA
 call mpi_sync_real_array( tavg_sgs(1:nx,1:ny,lbz:nz)%Nu_t, 0, MPI_SYNC_DOWNUP )
 #endif
 #endif
+
+! This still needs to be divided by kx!
+do k = lbz,nz
+    cv(:,:,k) = -imaginary_part(cv_n(:,:,k))/cv_d(:,:,k)
+end do
 
 ! Write all the 3D data
 #ifdef PPCGNS
@@ -1671,6 +1705,10 @@ open(unit=13,file=fname_cs,form='unformatted',convert=write_endian,access='direc
 write(13,rec=1) tavg(:nx,:ny,1:nz)%cs_opt2 
 close(13)
 
+open(unit=13,file=fname_cv,form='unformatted',convert=write_endian,access='direct',recl=lh*ny*nz*rprec)
+write(13,rec=1) cv(:lh,:ny,1:nz) 
+close(13)
+
 #endif
 
 #ifdef PPMPI
@@ -1717,6 +1755,8 @@ deallocate(rs)
 call mpi_barrier( comm, ierr )
 #endif
 
+deallocate(cv)
+
 return
 end subroutine tavg_finalize
 
@@ -1745,6 +1785,8 @@ call string_concat( fname, '.c', coord)
 open(1, file=fname, action='write', position='rewind',form='unformatted', convert=write_endian)
 write(1) tavg_total_time
 write(1) tavg
+write(1) cv_n
+write(1) cv_d
 close(1)
 
 #ifdef PPOUTPUT_EXTRA
