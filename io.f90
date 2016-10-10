@@ -1395,8 +1395,8 @@ allocate(w_uv(nx,ny,lbz:nz))
 w_uv(1:nx,1:ny,lbz:nz)= interp_to_uv_grid(w(1:nx,1:ny,lbz:nz), lbz )
 
 do k = lbz,nz
-    cv_n(:,:,k) = cv_n(:,:,k) + conjugate(uhat(:,:,k)) * &
-        (uhat(:,:,k)-uhat_prev(:,:,k)) / dt * tavg_dt
+    cv_n(:,:,k) = cv_n(:,:,k) + multiply(conjugate(uhat(:,:,k)),               &
+        (uhat(:,:,k)-uhat_prev(:,:,k))) / dt * tavg_dt
     cv_d(:,:,k) = cv_d(:,:,k) + magnitude(uhat(:,:,k))**2 * tavg_dt
 end do
 
@@ -1487,6 +1487,7 @@ use mpi_defs, only : mpi_sync_real_array,MPI_SYNC_DOWNUP
 use param, only : ierr,comm
 #endif
 use emul_complex
+use fft, only : kx
 
 implicit none
 
@@ -1604,7 +1605,7 @@ call mpi_sync_real_array( tavg_sgs(1:nx,1:ny,lbz:nz)%Nu_t, 0, MPI_SYNC_DOWNUP )
 
 ! This still needs to be divided by kx!
 do k = lbz,nz
-    cv(:,:,k) = -imaginary_part(cv_n(:,:,k))/cv_d(:,:,k)
+    cv(:,:,k) = -imaginary_part(cv_n(:,:,k)) / cv_d(:,:,k) / kx
 end do
 
 ! Write all the 3D data
