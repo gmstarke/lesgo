@@ -381,6 +381,7 @@ function real_part(c) result(r)
 real(rprec), dimension(:, :) :: c
 real(rprec), dimension(:, :), allocatable :: r
 integer :: nx, ny
+integer :: i, j
 
 if (mod(size(c,1),2) /= 0) then
     write(*,*) 'c is an invalid complex array'
@@ -391,16 +392,21 @@ ny = size(c,2)
 
 allocate( r(nx, ny) )
 
-r = c(1:2:nx,:)
+do i = 1, nx
+    do j = 1, ny
+        r(i,j) = c(2*i-1,j)
+    end do
+end do
 
 end function real_part
 
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-function imaginary_part(c) result(i)
+function imaginary_part(c) result(im)
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 real(rprec), dimension(:, :) :: c
-real(rprec), dimension(:, :), allocatable :: i
+real(rprec), dimension(:, :), allocatable :: im
 integer :: nx, ny
+integer :: i, j
 
 if (mod(size(c,1),2) /= 0) then
     write(*,*) 'c is an invalid complex array'
@@ -409,9 +415,13 @@ end if
 nx = size(c,1)/2
 ny = size(c,2)
 
-allocate( i(nx, ny) )
+allocate( im(nx, ny) )
 
-i = c(2:2:nx,:)
+do i = 1, nx
+    do j = 1, ny
+        im(i,j) = c(2*i,j)
+    end do
+end do
 
 end function imaginary_part
 

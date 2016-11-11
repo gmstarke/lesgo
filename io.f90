@@ -452,7 +452,8 @@ use param, only : xplane_calc, xplane_nstart, xplane_nend, xplane_nskip
 use param, only : yplane_calc, yplane_nstart, yplane_nend, yplane_nskip
 use param, only : zplane_calc, zplane_nstart, zplane_nend, zplane_nskip
 use stat_defs, only : tavg_initialized,tavg_dt
-use param, only : lbz, nx, ny, nz
+use param, only : lbz, nz
+use emul_complex, only : conjugate
 use sim_param, only : u, uhat, uhat_prev
 use fft
 implicit none
@@ -469,7 +470,7 @@ endif
 
 ! Always compute uhat and save previous value
 uhat_prev = uhat
-uhat = u / nx / ny
+uhat = u
 do k = lbz, nz
     call dfftw_execute_dft_r2c(forw, uhat(:,:,k), uhat(:,:,k))
 end do
@@ -1382,7 +1383,7 @@ use sim_param, only : fxa, fya, fza
 use functions, only : interp_to_uv_grid
 use emul_complex
 use sim_param, only : uhat, uhat_prev
-use param, only : dt
+use param, only : dt_dim
 
 implicit none
 
@@ -1396,7 +1397,7 @@ w_uv(1:nx,1:ny,lbz:nz)= interp_to_uv_grid(w(1:nx,1:ny,lbz:nz), lbz )
 
 do k = lbz,nz
     cv_n(:,:,k) = cv_n(:,:,k) + multiply(conjugate(uhat(:,:,k)),               &
-        (uhat(:,:,k)-uhat_prev(:,:,k))) / dt * tavg_dt
+        (uhat(:,:,k)-uhat_prev(:,:,k))) / dt_dim * tavg_dt
     cv_d(:,:,k) = cv_d(:,:,k) + magnitude(uhat(:,:,k))**2 * tavg_dt
 end do
 
@@ -1548,6 +1549,7 @@ call string_concat(fname_f, bin_ext)
 call string_concat(fname_rs, bin_ext)
 call string_concat(fname_cs, bin_ext)
 call string_concat(fname_cs, bin_ext)
+call string_concat(fname_cv, bin_ext)
 #endif
 
 ! Final checkpoint all restart data
@@ -1603,7 +1605,7 @@ call mpi_sync_real_array( tavg_sgs(1:nx,1:ny,lbz:nz)%Nu_t, 0, MPI_SYNC_DOWNUP )
 #endif
 #endif
 
-! This still needs to be divided by kx!
+! Calculate convective velocity (del Alamo and Jimenez Eq. 2.2)
 do k = lbz,nz
     cv(:,:,k) = -imaginary_part(cv_n(:,:,k)) / cv_d(:,:,k) / kx
 end do
