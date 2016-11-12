@@ -1383,7 +1383,7 @@ use sim_param, only : fxa, fya, fza
 use functions, only : interp_to_uv_grid
 use emul_complex
 use sim_param, only : uhat, uhat_prev
-use param, only : dt_dim
+use param, only : dt
 
 implicit none
 
