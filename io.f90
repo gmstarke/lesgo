@@ -1397,7 +1397,7 @@ w_uv(1:nx,1:ny,lbz:nz)= interp_to_uv_grid(w(1:nx,1:ny,lbz:nz), lbz )
 
 do k = lbz,nz
     cv_n(:,:,k) = cv_n(:,:,k) + multiply(conjugate(uhat(:,:,k)),               &
-        (uhat(:,:,k)-uhat_prev(:,:,k))) / dt_dim * tavg_dt
+        (uhat(:,:,k)-uhat_prev(:,:,k))) / dt * tavg_dt
     cv_d(:,:,k) = cv_d(:,:,k) + magnitude(uhat(:,:,k))**2 * tavg_dt
 end do
 
