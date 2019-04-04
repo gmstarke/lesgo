@@ -1,0 +1,5 @@
+Fork: gmstarke
+Branch: wake_2d_gaussian-to-tophat
+
+This branch uses a wake model that features a gaussian wake expansion in the near wake, and a tophat wake expansion in the far wake
+It also uses a non-uniform inflow
