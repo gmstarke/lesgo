@@ -1,5 +1,5 @@
 !!
-!!  Copyright (C) 2011-2017  Johns Hopkins University
+!  Copyright (C) 2011-2017  Johns Hopkins University
 !!
 !!  This file is part of lesgo.
 !!
@@ -132,15 +132,12 @@ call output_init()
 #ifdef PPTURBINES
 call turbines_init()    ! must occur before initial is called
 #endif
-
 #ifdef PPATM
 call atm_lesgo_initialize()
 #endif
-
 #ifdef PPHIT
 ! This initializes HIT Data
 ! The input is read from lesgo.conf
-write(*,*) 'Inflow Condition using HIT Data'
 call initialize_HIT()
 #endif
 
@@ -149,15 +146,12 @@ call initialize_HIT()
 call level_set_base_init()
 call level_set_init ()
 #endif
-
 ! Formulate the fft plans--may want to use FFTW_USE_WISDOM
 ! Initialize the kx,ky arrays
 call init_fft()
-
 ! Initialize test filter(s)
 ! this is used for lower BC, even if no dynamic model
 call test_filter_init( )
-
 ! Initialize velocity field
 call initial()
 

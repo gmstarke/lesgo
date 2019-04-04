@@ -1,4 +1,4 @@
-!!
+!
 !!  Copyright (C) 2010-2016  Johns Hopkins University
 !!
 !!  This file is part of lesgo.
@@ -122,7 +122,7 @@ character(*), parameter :: Pref_dat = path // input_folder // 'Pref.dat'
 character(*), parameter :: output_folder = 'turbine/'
 character(*), parameter :: vel_top_dat = path // output_folder // 'vel_top.dat'
 character(*), parameter :: u_d_T_dat = path // output_folder // 'u_d_T.dat'
-integer, dimension(:), allocatable :: forcing_fid
+integer, dimension(:), allocatable :: forcing_fid, du_fid, duLES_fid
 
 ! epsilon used for disk velocity time-averaging
 real(rprec) :: eps
@@ -173,6 +173,7 @@ nloc = num_x*num_y
 nullify(wind_farm%turbine)
 allocate(wind_farm%turbine(nloc))
 allocate(forcing_fid(nloc))
+allocate(du_fid(nloc))
 
 ! Create turbine directory
 call system("mkdir -vp turbine")
@@ -285,7 +286,7 @@ if (use_receding_horizon) call receding_horizon_init
 
 ! Cleanup
 nullify(x,y,z)
-
+!write(*,*) 'End of turb_init'
 end subroutine turbines_init
 
 !*******************************************************************************
@@ -294,6 +295,7 @@ subroutine wake_model_est_init
 use param, only : u_star, CHAR_BUFF_LENGTH
 use wake_model_class
 use functions, only : linear_interp
+use string_util, only: string_splice
 implicit none
 
 real(rprec)                               :: U_infty, wm_Delta, wm_Dia
@@ -309,8 +311,13 @@ inquire (file=string1, exist=exst)
 
 if (exst) then
     write(*,*) 'Reading wake model estimator data from wake_model/'
+
+write(*,*) 'present!'
     wm_est = WakeModelEstimator(path // 'wake_model', sigma_du, sigma_k,       &
         sigma_Phat, tau_U_infty)
+
+write(*,*) 'after!'
+write(*,*) 'processor: ', coord
 else
     wm_Dia = dia_all*z_i
     wm_Delta = 0.5 * wm_Dia
@@ -321,6 +328,7 @@ else
     allocate( wm_s(nloc,2) )
 
     wm_k = 0.05_rprec
+!    wm_k = 0.08_rprec
 
     wm_s(:,1) = wind_farm%turbine%xloc * z_i
     wm_s(:,2) = wind_farm%turbine%yloc * z_i
@@ -341,7 +349,6 @@ else
     wm_Pm(:) = wm_Pm - wm_Ctp * (wind_farm%turbine%u_d_T * u_star)**3
     call wm_est%generateInitialEnsemble(wm_Ctp, wm_Pm)
 end if
-
 if (coord == 0) then
     ! Generate the files for the wake model estimator
     string1 = trim( path // 'turbine/wake_model_U_infty.dat' )
@@ -360,6 +367,12 @@ if (coord == 0) then
     open(newunit=yu_inf_fid , file=string1, status='unknown', form='formatted',&
         action='write', position='append')
 
+    do i = 1, wm_est%wm%N
+           call string_splice(string1, path // 'turbine/du_', i, '.dat' )
+           open(newunit=du_fid(i), file=string1, status='unknown', form='formatted', &
+               action='write', position='append')
+    end do
+
     ! Write initial values
     write(U_infty_fid, *) total_time_dim, wm_est%wm%U_infty
     write(Phat_fid, *) total_time_dim, wm_est%wm%Phat
@@ -372,40 +385,40 @@ end subroutine wake_model_est_init
 !*******************************************************************************
 subroutine receding_horizon_init
 !*******************************************************************************
-use functions, only : linear_interp
-implicit none
-
-logical :: exst
-character(*), parameter :: rh_dat = path // 'turbine/rh.dat'
-integer :: fid, N
-
-! We're now going to use dynamic Ct_primes for the control
-! Deallocate the arrays because they will be reset.
-if (.not. dyn_Ct_prime) then
-   dyn_Ct_prime = .true.
-else
-   deallocate( Ct_prime_time )
-   deallocate( Ct_prime_arr )
-end if
-
-inquire (file=rh_dat, exist=exst)
-if (exst) then
-   open(newunit=fid, file=rh_dat, status='unknown', form='unformatted',    &
-       action='read', position='rewind')
-   read(fid) N
-   allocate( Ct_prime_time(N) )
-   allocate( Ct_prime_arr(nloc, N) )
-   allocate( phi_arr(nloc, N) )
-   read(fid) Ct_prime_time
-   read(fid) Ct_prime_arr
-   close(fid)
-else
-   allocate( Ct_prime_time(1) )
-   allocate( Ct_prime_arr(nloc, 1) )
-   allocate( phi_arr(nloc, 1) )
-   Ct_prime_arr = Ct_prime
-   phi_arr = Ct_prime
-end if
+!use functions, only : linear_interp
+!implicit none
+!
+!logical :: exst
+!character(*), parameter :: rh_dat = path // 'turbine/rh.dat'
+!integer :: fid, N
+!
+!! We're now going to use dynamic Ct_primes for the control
+!! Deallocate the arrays because they will be reset.
+!if (.not. dyn_Ct_prime) then
+!   dyn_Ct_prime = .true.
+!else
+!   deallocate( Ct_prime_time )
+!   deallocate( Ct_prime_arr )
+!end if
+!
+!inquire (file=rh_dat, exist=exst)
+!if (exst) then
+!   open(newunit=fid, file=rh_dat, status='unknown', form='unformatted',    &
+!       action='read', position='rewind')
+!   read(fid) N
+!   allocate( Ct_prime_time(N) )
+!   allocate( Ct_prime_arr(nloc, N) )
+!   allocate( phi_arr(nloc, N) )
+!   read(fid) Ct_prime_time
+!   read(fid) Ct_prime_arr
+!   close(fid)
+!else
+!   allocate( Ct_prime_time(1) )
+!   allocate( Ct_prime_arr(nloc, 1) )
+!   allocate( phi_arr(nloc, 1) )
+!   Ct_prime_arr = Ct_prime
+!   phi_arr = Ct_prime
+!end if
 
 end subroutine receding_horizon_init
 
@@ -441,7 +454,6 @@ real(rprec) :: filt
 real(rprec), dimension(nloc) :: sumA, turbine_vol
 
 nullify(x,y,z)
-
 x => grid % x
 y => grid % y
 z => grid % z
@@ -600,7 +612,6 @@ real(rprec), pointer :: p_Ct_prime => null()
 integer, pointer :: p_icp => null(), p_jcp => null(), p_kcp => null()
 
 integer :: fid
-
 real(rprec) :: ind2
 real(rprec), dimension(nloc) :: disk_avg_vel
 real(rprec), dimension(nloc) :: u_vel_center, v_vel_center, w_vel_center
@@ -616,6 +627,7 @@ z => grid % z
 
 allocate(w_uv(ld,ny,lbz:nz))
 
+!write(*,*) "yo"
 #ifdef PPMPI
 !syncing intermediate w-velocities
 call mpi_sync_real_array(w, 0, MPI_SYNC_DOWNUP)
@@ -733,13 +745,14 @@ if (coord .eq. nproc-1) then
 end if
 
 if (use_wake_model) then
+
     ! Input thrust coefficient
     allocate ( wm_Ctp(nloc) )
     wm_Ctp(:) = wind_farm%turbine%Ct_prime
 !    do i = 1, num_x
 !        wm_Ctp(i) = wind_farm%turbine((i-1)*num_y+1)%Ct_prime
 !    end do
-
+!write(*,*) 'Before Wm'
     ! Measure average power of each turbine
     allocate ( wm_Pm(nloc) )
     wm_Pm = 0._rprec
@@ -754,15 +767,20 @@ if (use_wake_model) then
     ! Advance the estimator with the measurements
     call wm_est%advance(dt_dim, wm_Pm, wm_Ctp)
 
-    ! Write to file
-    if (modulo (jt_total, tbase) == 0 .and. coord == 0) then
+!write(*,*) 'after wm advance'
+    
+     ! writing the data
+     if (modulo (jt_total, tbase) == 0 .and. coord == 0) then
         write(k_fid, *) total_time_dim, wm_est%wm%k
         write(U_infty_fid, *) total_time_dim, wm_est%wm%U_infty
         write(Phat_fid, *) total_time_dim, wm_est%wm%Phat
         write(u_fid, *) total_time_dim, wm_est%wm%u
         write(yu_inf_fid, *) total_time_dim, wm_est%wm%yu_inf
+        do i = 1,wm_est%wm%N
+             write(du_fid(i), *) total_time_dim, wm_est%wm%du(i,:)
+        enddo
     end if
-
+!write(*,*) 'After wm'
     ! Cleanup
     deallocate(wm_Ctp)
     deallocate(wm_Pm)
@@ -781,82 +799,82 @@ end subroutine turbines_forcing
 !*******************************************************************************
 subroutine eval_receding_horizon ()
 !*******************************************************************************
-use rh_control
-use conjugate_gradient_class
-use lbfgsb_class
-use wake_model_class
-use functions, only : linear_interp
-implicit none
-
-type(MinimizedFarm) :: mfarm
-type(ConjugateGradient) :: cg
-type(lbfgsb) :: bf
-integer :: num_t = 0
-real(rprec), dimension(:), allocatable :: buffer_array
-
-! Only perform receding horizon control every advancement step
-if (modulo (jt_total, advancement_base) == 0) then
-    if (coord == 0) then
-        ! Run initial guess in object
-        mfarm = MinimizedFarm(wm_est%wm, total_time_dim, horizon_time,         &
-            0.99_rprec, Pref_time, Pref_arr, phi_tau)
-       call mfarm%run(Ct_prime_time, phi_arr)
-
-       ! Perform optimization
-       if (solver == 1) then
-           cg = ConjugateGradient(mfarm, max_iter, Ct_prime_min, Ct_prime_max)
-           call cg%minimize(mfarm%get_phi_vector())
-       else
-           bf = lbfgsb(mfarm, max_iter, Ct_prime_min, Ct_prime_max)
-           call bf%minimize(mfarm%get_phi_vector())
-       end if
-       call mfarm%makeDimensional
-
-       ! Place result in buffer array
-       num_t = mfarm%Nt
-       allocate( buffer_array((nloc + 1) * num_t) )
-       buffer_array(1:num_t) = mfarm%t
-       do i = 1, nloc
-           buffer_array((num_t*i+1):num_t*(i+1)) = mfarm%Ctp(i,:)
-       end do
-
-       ! Store phi vector for next iteration
-       deallocate(phi_arr)
-       allocate( phi_arr(nloc, num_t) )
-       phi_arr = mfarm%phi
-
-#ifdef PPMPI
-       ! Send to other processors
-       do i = 1, nproc-1
-           call MPI_send( (nloc + 1) * mfarm%Nt, 1, MPI_integer, i, &
-               10, comm, ierr)
-           call MPI_send( buffer_array, (nloc + 1) * mfarm%Nt, MPI_rprec, i, &
-               11, comm, ierr)
-       end do
-   else
-
-       ! Receive from coord 0
-       call MPI_recv(num_t, 1, MPI_integer, 0, 10, comm, status, ierr)
-       num_t = num_t / (nloc+1)
-       allocate( buffer_array(num_t*(nloc+1)) )
-       call MPI_recv(buffer_array, num_t*(nloc+1), MPI_rprec, 0, 11, comm, status, ierr)
-#endif
-   end if
-
-   ! Place row Ct_prime's into interpolation array
-   deallocate(Ct_prime_time)
-   allocate(Ct_prime_time(num_t))
-   Ct_prime_time = buffer_array(1:num_t)
-   deallocate(Ct_prime_arr)
-   allocate( Ct_prime_arr(nloc,num_t) )
-   do i = 1, nloc
-       Ct_prime_arr(i, :) = buffer_array((num_t*i+1):num_t*(i+1))
-   end do
-
-   ! Cleanup
-   deallocate(buffer_array)
-end if
-
+!use rh_control
+!use conjugate_gradient_class
+!use lbfgsb_class
+!use wake_model_class
+!use functions, only : linear_interp
+!implicit none
+!
+!type(MinimizedFarm) :: mfarm
+!type(ConjugateGradient) :: cg
+!type(lbfgsb) :: bf
+!integer :: num_t = 0
+!real(rprec), dimension(:), allocatable :: buffer_array
+!
+!! Only perform receding horizon control every advancement step
+!if (modulo (jt_total, advancement_base) == 0) then
+!    if (coord == 0) then
+!        ! Run initial guess in object
+!        mfarm = MinimizedFarm(wm_est%wm, total_time_dim, horizon_time,         &
+!            0.99_rprec, Pref_time, Pref_arr, phi_tau)
+!       call mfarm%run(Ct_prime_time, phi_arr)
+!
+!       ! Perform optimization
+!       if (solver == 1) then
+!           cg = ConjugateGradient(mfarm, max_iter, Ct_prime_min, Ct_prime_max)
+!           call cg%minimize(mfarm%get_phi_vector())
+!       else
+!           bf = lbfgsb(mfarm, max_iter, Ct_prime_min, Ct_prime_max)
+!           call bf%minimize(mfarm%get_phi_vector())
+!       end if
+!       call mfarm%makeDimensional
+!
+!       ! Place result in buffer array
+!       num_t = mfarm%Nt
+!       allocate( buffer_array((nloc + 1) * num_t) )
+!       buffer_array(1:num_t) = mfarm%t
+!       do i = 1, nloc
+!           buffer_array((num_t*i+1):num_t*(i+1)) = mfarm%Ctp(i,:)
+!       end do
+!
+!       ! Store phi vector for next iteration
+!       deallocate(phi_arr)
+!       allocate( phi_arr(nloc, num_t) )
+!       phi_arr = mfarm%phi
+!
+!#ifdef PPMPI
+!       ! Send to other processors
+!       do i = 1, nproc-1
+!           call MPI_send( (nloc + 1) * mfarm%Nt, 1, MPI_integer, i, &
+!               10, comm, ierr)
+!           call MPI_send( buffer_array, (nloc + 1) * mfarm%Nt, MPI_rprec, i, &
+!               11, comm, ierr)
+!       end do
+!   else
+!
+!       ! Receive from coord 0
+!       call MPI_recv(num_t, 1, MPI_integer, 0, 10, comm, status, ierr)
+!       num_t = num_t / (nloc+1)
+!       allocate( buffer_array(num_t*(nloc+1)) )
+!       call MPI_recv(buffer_array, num_t*(nloc+1), MPI_rprec, 0, 11, comm, status, ierr)
+!#endif
+!   end if
+!
+!   ! Place row Ct_prime's into interpolation array
+!   deallocate(Ct_prime_time)
+!   allocate(Ct_prime_time(num_t))
+!   Ct_prime_time = buffer_array(1:num_t)
+!   deallocate(Ct_prime_arr)
+!   allocate( Ct_prime_arr(nloc,num_t) )
+!   do i = 1, nloc
+!       Ct_prime_arr(i, :) = buffer_array((num_t*i+1):num_t*(i+1))
+!   end do
+!
+!   ! Cleanup
+!   deallocate(buffer_array)
+!end if
+!
 end subroutine eval_receding_horizon
 
 !*******************************************************************************
