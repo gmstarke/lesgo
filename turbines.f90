@@ -312,12 +312,11 @@ inquire (file=string1, exist=exst)
 if (exst) then
     write(*,*) 'Reading wake model estimator data from wake_model/'
 
-write(*,*) 'present!'
     wm_est = WakeModelEstimator(path // 'wake_model', sigma_du, sigma_k,       &
         sigma_Phat, tau_U_infty)
 
-write(*,*) 'after!'
-write(*,*) 'processor: ', coord
+!write(*,*) 'after!'
+!write(*,*) 'processor: ', coord
 else
     wm_Dia = dia_all*z_i
     wm_Delta = 0.5 * wm_Dia
@@ -325,13 +324,14 @@ else
     allocate( wm_Ctp(nloc) )
     allocate( wm_k(nloc) )
     allocate( wm_Pm(nloc) )
-    allocate( wm_s(nloc,2) )
+    allocate( wm_s(nloc,3) )
 
     wm_k = 0.05_rprec
 !    wm_k = 0.08_rprec
 
     wm_s(:,1) = wind_farm%turbine%xloc * z_i
     wm_s(:,2) = wind_farm%turbine%yloc * z_i
+    wm_s(:,3) = wind_farm%turbine%height * z_i
     wm_Ctp(:) = wind_farm%turbine%Ct_prime
 
     U_infty = 0

@@ -1,4 +1,5 @@
-!!
+!
+!
 !!  Copyright (C) 2016  Johns Hopkins University
 !!
 !!  This file is part of lesgo.
@@ -35,6 +36,7 @@ type wake_model_base
     real(rprec), dimension(:), allocatable :: k    ! wake expansion coefficient
     real(rprec), dimension(:), allocatable :: x    ! streamwise coordinate
     real(rprec), dimension(:), allocatable :: y    ! spanwise coordinate
+    real(rprec), dimension(:), allocatable :: z    ! vertical coordinate
     real(rprec), dimension(:), allocatable :: yu_inf   ! freestream flow in y
     real(rprec), dimension(:,:), allocatable :: s      ! turbine location
     real(rprec), dimension(:,:), allocatable :: G      ! Gaussian forcing function (turbine, space)
@@ -42,18 +44,27 @@ type wake_model_base
     real(rprec), dimension(:,:), allocatable :: d      ! dimensionless wake diameter (turbine, space)
     real(rprec), dimension(:,:), allocatable :: dp     ! d/dx of d (turbine, space)
     real(rprec), dimension(:,:), allocatable :: w      ! wake expansion function (turbine, space)
-    real(rprec), dimension(:,:), allocatable :: fp     ! forcing prefactor f = fp*Ctp/(4+Ctp)  (turbine, space)
+    real(rprec), dimension(:,:), allocatable :: fp     ! forcing prefactor f = fp*Ctp*u_d  (turbine, space)
+    real(rprec), dimension(:,:,:), allocatable :: disk ! matrix holding the disk faces
+    real(rprec), dimension(:,:,:,:), allocatable :: diskw! matrix holding the disk faces
+!    real(rprec), dimension(:,:,:,:), allocatable ::Wf  ! wake expansion function (turbine, space)
     real(rprec) :: U_infty = 0                         ! inlet velocity
     real(rprec) :: Delta   = 0                         ! Gaussian forcing width
     real(rprec) :: Dia     = 0                         ! rotor diameter
     real(rprec) :: dx      = 0                         ! rotor diameter
     real(rprec) :: dy      = 0                         ! delta in spanwise direction
+    real(rprec) :: dz      = 0                         ! delta in vertical direction
     integer     :: Nx      = 0                         ! Number of streamwise points
     integer     :: Ny      = 0                         ! Number of spanwise points
+    integer     :: dNy     = 32                        ! Number of spanwise cells in turbine disk
+    integer     :: dNz     = 32                        ! Number of vertical cells in turbine disk
     integer     :: N       = 0                         ! Number of turbines
     integer     :: nfree   = 0                         ! Number of un-waked turb
+    real(rprec) :: sigma_o = 0  
     integer, dimension(:), allocatable       :: wake_num
     integer, dimension(:), allocatable       :: free_turbines
+    integer, dimension(:,:), allocatable     :: Cx
+    integer, dimension(:,:), allocatable     :: px 
     integer, dimension(:,:), allocatable     :: ymin   ! Wake boundary vector L
     integer, dimension(:,:), allocatable     :: ymax   ! Wake boundary vector U
     logical     :: isDimensionless = .false.
@@ -66,6 +77,7 @@ contains
     procedure, public :: computeGaussians
     procedure, public :: computeWakeExpansionFunctions
     procedure, public :: compute2Dwakes
+    procedure, public :: compute_wake_disks
     procedure, public :: woketurbines
 end type wake_model_base
 
@@ -107,7 +119,7 @@ this%N = size(i_s(:,1))
 if ( size(i_k) /= this%N ) then
     call error('wake_model_base.initialize','s and k must be the same size')
 end if
-allocate( this%s(this%N, 2)   )
+allocate( this%s(this%N, 3)   )
 allocate( this%k(this%N)      )
 
 ! Allocate based on number of gridpoints
@@ -115,6 +127,7 @@ this%Nx = i_Nx
 this%Ny = i_Ny
 allocate( this%x(this%Nx) )
 allocate( this%y(this%Ny) )
+allocate( this%z(this%dNz) )
 allocate( this%yu_inf(this%Ny) )
 allocate( this%wake_num(this%N) )
 allocate( this%ymin(this%N, this%Nx) )
@@ -125,6 +138,11 @@ allocate( this%d(this%N,  this%Nx) )
 allocate( this%dp(this%N, this%Nx) )
 allocate( this%w(this%N,  this%Nx) )
 allocate( this%fp(this%N, this%Nx) )
+allocate( this%disk(this%N, this%dNy, this%dNz) )
+allocate( this%diskw(this%N, this%N, this%dNy, this%dNz) )
+allocate( this%Cx(this%N, this%Nx) )
+allocate( this%px(this%N, this%Nx) )
+!allocate( this%Wf(this%N,  this%Nx, this%Ny, this%dNz) )
 
 ! Assign input arguments
 this%s          = i_s
@@ -133,6 +151,7 @@ this%Delta      = i_Delta
 this%k          = i_k
 this%Dia        = i_Dia
 
+this%sigma_o   = this%Dia / 4
 
 ! Normalization constants
 this%VELOCITY = i_U_infty
@@ -145,6 +164,8 @@ this%dx = ( minval(this%s(:,1)) + maxval(this%s(:,1)) ) / this%Nx
 this%x(1) = this%dx/2
 this%dy = ( minval(this%s(:,2)) + maxval(this%s(:,2)) ) / this%Ny
 this%y(1) = this%dy/2
+this%dz = this%Dia / this%dNz
+this%z(1) = this%dz + (this%s(1,3)-(this%Dia/2))
 
 do i = 2, this%Nx
     this%x(i) = this%x(i-1) + this%dx
@@ -152,12 +173,15 @@ end do
 do i = 2, this%Ny
     this%y(i) = this%y(i-1) + this%dy
 end do
+do i = 2, this%dNz
+    this%z(i) = this%z(i-1) + this%dz
+end do
 
 call this%computeGaussians
 call this%computeWakeExpansionFunctions
 call this%compute2Dwakes
+call this%compute_wake_disks
 call this%woketurbines
-
 
 end subroutine initialize_val
 
@@ -188,15 +212,27 @@ subroutine computeWakeExpansionFunctions(this)
 !*******************************************************************************
 implicit none
 class(wake_model_base), intent(inout) :: this
-integer                             :: i
+integer                               :: i, j, k, m
 
 do i = 1, this%N
     this%d(i,:)  = 1.0 + this%k(i) * softplus(2.0 *                            &
-        (this%s(i,1) + 2.0 * this%Delta)/this%Dia, 2.0*this%x/this%Dia)
+        (this%s(i,1))/this%Dia, 2.0*this%x/this%Dia)
     this%dp(i,:) = 2.0 * this%k(i) * logistic(2.0 *                            &
-        (this%s(i,1) + 2.0 * this%Delta)/this%Dia, 2.0*this%x/this%Dia)/this%Dia
+        (this%s(i,1))/this%Dia, 2.0*this%x/this%Dia)/this%Dia
+!    this%px(i,:) = 2 * (1 + (this%Dia / (max((this%x-this%s(i,1)),0.002))))
+!    this%Cx(i,:) = (this%px(i,:)/(2 * gamma(2/this%px(i,:))))                  &
+!         *(((this%Dia**2)/(8*this%sigma_o**2))**(2/this%px(i,:)))
+!    do m = 1, this%Nx
+!        do j = 1, this%Ny
+!            do k = 1, this%dNz
+!                rn = sqrt((this%y(j)-this%s(i,2))**2 + (this%z(k)-this%s(i,3))**2)
+!                this%Wf(i,m,k,j)  = this%Cx(i,m) * exp(-(this%Dia**2)/(8*this%sigma_o**2)*     &
+!                    (((2*rn)/(this%Dia * this%d(m,:)) )**this%px(i,m)))
+!            enddo
+!        enddo
+!    enddo
     this%w(i,:)  = 2.0 * this%U_infty * this%dp(i,:) / this%d(i,:)
-    this%fp(i,:) = 2.0 * this%U_infty**2 * this%G(i,:) / ( this%d(i,:)**2 )
+    this%fp(i,:) =  (1/2)*this%U_infty * this%G(i,:)
 end do
 
 end subroutine computeWakeExpansionFunctions
@@ -249,6 +285,65 @@ do i = 1, this%N
 end do
 
 end subroutine compute2Dwakes
+
+!*******************************************************************************
+subroutine compute_wake_disks(this)
+!*******************************************************************************
+    use functions, only: linear_interp
+implicit none
+class(wake_model_base), intent(inout)  :: this
+integer                                :: i, j, k, m
+real(rprec)                            :: cell_size, hcs, c_z, c_y, center, dist
+real(rprec)                            :: ci, pix, rn, dc
+
+cell_size = (this%Dia) / this%dNy
+hcs = cell_size/2
+c_z = hcs
+c_y = hcs
+center = (this%Dia) / 2
+
+do i = 1, this%dNz
+   c_z = (i-1)*cell_size + hcs
+   do j = 1, this%dNy
+       c_y = (j-1) * cell_size + hcs
+       dist = sqrt((c_y-center)**2 + (c_z-center)**2)
+       if (dist < (this%Dia/2)) then
+          this%disk(1,j,i) = 1
+       else
+          this%disk(1,j,i) = 0
+       endif
+   enddo 
+   c_y = hcs
+enddo
+
+c_y = 0
+c_z = 0
+
+do i =1, this%N
+   this%disk(i,:,:) = this%disk(1,:,:)
+!   pi = 2 * (1 + (this%Dia / 0.002))
+!   ci = (pi/(2 * gamma(2/pi)))*(((this%Dia**2)/(8*this%sigma_o**2))**(2/pi))
+  
+   do m = 1, this%N
+       pix = 2 * (1 + (this%Dia / max((this%s(m,1)-this%s(i,1)),0.02)))
+       ci = (pix/(2 * gamma(2/pix)))*(((this%Dia**2)/(8*this%sigma_o**2))**(2/pix))
+       c_y = this%s(m,2) - center + hcs
+       dc = linear_interp(this%x,this%d(i,:),this%s(m,1))
+       do j = 1, this%dNy
+           c_z = this%s(m,3) - center + hcs
+           do k = 1, this%dNz
+               rn = sqrt((c_y-this%s(i,2))**2 + (c_z-this%s(i,3))**2)
+               this%diskw(i,m,j,k) = ci * exp(-(this%Dia**2)/(8*this%sigma_o**2)*     &
+                    ((((2*rn)/(this%Dia * dc)) )**pix))
+               c_z = c_z + cell_size
+          enddo
+          c_y = c_y + cell_size
+       enddo
+   enddo
+end do
+
+end subroutine compute_wake_disks
+!*********************************************************************************
 
 ! Find turbines not waked by other turbines
 subroutine woketurbines(this)
@@ -392,7 +487,10 @@ write(*,*) ' Dia             = ', this%Dia
 write(*,*) ' Nx              = ', this%Nx
 write(*,*) ' x               = ', this%x
 write(*,*) ' Ny              = ', this%Ny
+write(*,*) ' dNy             = ', this%dNy
+write(*,*) ' dNz             = ', this%dNz
 write(*,*) ' y               = ', this%y
+write(*,*) ' z               = ', this%z
 write(*,*) ' yu_inf          = ', this%yu_inf
 write(*,*) ' dx              = ', this%dx
 write(*,*) ' dy              = ', this%dy
@@ -514,11 +612,11 @@ subroutine initialize_file(this, fstring)
     !  Open vel.out (lun_default in io) for final output
     open(newunit=fid , file=fstring, status='unknown', form='unformatted',     &
         action='read', position='rewind')
-    read(fid) this%N, this%Nx, this%Ny, this%dx, this%dy, this%Dia, this%Delta,&
-              this%U_infty, this%isDimensionless
+    read(fid) this%N, this%Nx, this%Ny, this%dNy, this%dNz, this%dx, this%dy, this%Dia, this%Delta,&
+              this%U_infty, this%sigma_o, this%isDimensionless
     read(fid) this%LENGTH, this%VELOCITY, this%TIME, this%FORCE
 
-    allocate( this%s(this%N, 2) )
+    allocate( this%s(this%N, 3) )
     allocate( this%k(this%N)    )
     allocate( this%uhat(this%N) )
     allocate( this%wake_num(this%N) )
@@ -526,6 +624,7 @@ subroutine initialize_file(this, fstring)
     allocate( this%Ctp(this%N)  )
     allocate( this%x(this%Nx) )
     allocate( this%y(this%Ny) )
+    allocate( this%z(this%dNz) )
     allocate( this%yu_inf(this%Ny) )
     allocate( this%ymin(this%N, this%Nx) )
     allocate( this%ymax(this%N, this%Nx) )
@@ -537,14 +636,19 @@ subroutine initialize_file(this, fstring)
     allocate( this%w(this%N,  this%Nx) )
     allocate( this%fp(this%N, this%Nx) )
     allocate( this%du(this%N, this%Nx) )
+    allocate( this%disk(this%N, this%dNy, this%dNz) )
+    allocate( this%diskw(this%N, this%N, this%dNy, this%dNz) )
+!    allocate( this%Wf(this%N, this%Nx, this%Ny, this%dNz) )
 
     read(fid) this%s
     read(fid) this%k
     read(fid) this%x
     read(fid) this%y
+    read(fid) this%z
     read(fid) this%yu_inf
     read(fid) this%du
     read(fid) this%u
+    read(fid) this%disk
     read(fid) this%uhat
     read(fid) this%Phat
     read(fid) this%Ctp
@@ -553,6 +657,7 @@ subroutine initialize_file(this, fstring)
     call this%computeGaussians
     call this%computeWakeExpansionFunctions
     call this%compute2Dwakes
+    call this%compute_wake_disks
     call this%woketurbines
 
 end subroutine initialize_file
@@ -594,16 +699,18 @@ subroutine write_to_file(this, fstring)
     !  Open vel.out (lun_default in io) for final output
     open(newunit=fid , file=fstring, status='unknown', form='unformatted',     &
         action='write', position='rewind')
-    write(fid) this%N, this%Nx, this%Ny, this%dx, this%dy, this%Dia, this%Delta,          &
-               this%U_infty, this%isDimensionless
+    write(fid) this%N, this%Nx, this%Ny, this%dNy, this%dNz, this%dx, this%dy, &
+               this%Dia, this%Delta, this%U_infty, this%sigma_o, this%isDimensionless
     write(fid) this%LENGTH, this%VELOCITY, this%TIME, this%FORCE
     write(fid) this%s
     write(fid) this%k
     write(fid) this%x
     write(fid) this%y
+    write(fid) this%z
     write(fid) this%yu_inf
     write(fid) this%du
     write(fid) this%u
+    write(fid) this%disk
     write(fid) this%uhat
     write(fid) this%Phat
     write(fid) this%Ctp
@@ -622,8 +729,11 @@ subroutine print(this)
     write(*,*) ' Dia             = ', this%Dia
     write(*,*) ' Nx              = ', this%Nx
     write(*,*) ' Ny              = ', this%Ny
+    write(*,*) ' dNy             = ', this%dNy
+    write(*,*) ' dNz             = ', this%dNz
     write(*,*) ' x               = ', this%x
     write(*,*) ' y               = ', this%y
+    write(*,*) ' z               = ', this%z
     write(*,*) ' yu_inf          = ', this%yu_inf
     write(*,*) ' dx              = ', this%dx
     write(*,*) ' dy              = ', this%dy
@@ -647,15 +757,17 @@ end subroutine print
 
 subroutine advance(this, Ctp, dt)
     use util, only : ddx_upwind1
+    use functions, only: linear_interp
     implicit none
     class(WakeModel), intent(inout)          :: this
     real(rprec), intent(in)                  :: dt
     real(rprec), dimension(:), intent(in)    :: Ctp
     integer                                  :: i, j
-    real(rprec)                              :: diff
-    real(rprec), dimension(:,:), allocatable :: du_superimposed, new_ui
+    real(rprec)                              :: diff, a1, a2, du_loop
+    real(rprec), dimension(:,:,:), allocatable :: new_ui
+    real(rprec), dimension(:,:,:), allocatable :: du_sum, u_field
 
-    allocate( new_ui(this%Nx,this%Ny) )
+    allocate( new_ui(this%N,this%dNy,this%dNz) )
 
     if (size(Ctp) /= this%N) then
         call error('WakeModel.advance','Ctp must be size N')
@@ -664,7 +776,7 @@ subroutine advance(this, Ctp, dt)
     ! Compute new wake deficit and superimpose wakes
     do i = 1, this%N
         this%du(i,:) = this%du(i,:) +  dt * this%rhs(this%du(i,:),             &
-            this%fp(i,:) * this%Ctp(i) / (4.0 + this%Ctp(i)), i)
+            this%fp(i,:) * this%Ctp(i) * this%uhat(i), i)
 !        if (i == 1 .and. coord == 0) then
 !            write(*,*) 'dt: ', dt
 !            write(*,*) 'rhs: ', this%rhs(this%du(i,:),             &
@@ -672,31 +784,36 @@ subroutine advance(this, Ctp, dt)
 !            write(*,*) 'inputs (forcing) = ', this%fp(i,:) * this%Ctp(i) / (4.0 + this%Ctp(i))
 !        endif
     end do
-    allocate( du_superimposed( this%Nx, this%Ny) )
-    du_superimposed = 0._rprec
+    allocate( du_sum( this%N, this%dNy, this%dNz) )
+    allocate( u_field( this%N, this%dNy, this%dNz) )
+    du_sum = 0._rprec
     do i = 1, this%N
-        do j = 1, this%Nx
-            du_superimposed(j,this%ymin(i,j):this%ymax(i,j)) =                 &
-                du_superimposed(j,this%ymin(i,j):this%ymax(i,j))               &
-                +this%du(i,j)**2
-            new_ui(j,:) = this%yu_inf
+       do j = 1, this%N
+           du_loop = linear_interp(this%x,this%du(j,:),this%s(i,1))
+           du_sum(i,:,:) = du_sum(i,:,:) + du_loop * this%diskw(j,i,:,:)
+!            du_superimposed(j,this%ymin(i,j):this%ymax(i,j)) =                 &
+!                du_superimposed(j,this%ymin(i,j):this%ymax(i,j))               &
+!                +this%du(i,j)**2
         end do
+        new_ui(i,:,:) = linear_interp(this%y,this%yu_inf,this%s(i,2))
     end do
-    du_superimposed = sqrt(du_superimposed)
 
     ! Find the velocity field
-    this%u = new_ui - du_superimposed
+    u_field = new_ui - du_sum
 
     ! Find estimated velocities
     this%uhat(:) = 0
     do i = 1, this%N
-        do j = this%ymin(i,1), this%ymax(i,1)
-            this%uhat(i) = this%uhat(i)                                        &
-                + sum(this%G(i,this%Gstart(i):this%Gstop(i))                   &
-                * this%u(this%Gstart(i):this%Gstop(i),j) * this%dx)
-        end do
-        diff = this%ymax(i,1) - this%ymin(i,1)
-        this%uhat(i) = this%uhat(i) / (diff + 1)
+        a1 = sum(sum(this%disk(i,:,:),dim=1))
+        a2 = sum(sum(u_field(i,:,:)*this%disk(i,:,:),dim=1))
+        this%uhat(i) = a2 / a1
+!        do j = this%ymin(i,1), this%ymax(i,1)
+!            this%uhat(i) = this%uhat(i)                                        &
+!                + sum(this%G(i,this%Gstart(i):this%Gstop(i))                   &
+!                * this%u(this%Gstart(i):this%Gstop(i),j) * this%dx)
+!        end do
+!        diff = this%ymax(i,1) - this%ymin(i,1)
+!        this%uhat(i) = this%uhat(i) / (diff + 1)
         this%Ctp(i) = Ctp(i)
         this%Phat(i) = this%Ctp(i) * this%uhat(i)**3
     end do
@@ -1070,7 +1187,6 @@ subroutine initialize_val(this, i_s, i_U_infty, i_Delta, i_k, i_Dia, i_Nx, i_Ny,
         this%ensemble(i+coord*this%Ne) = WakeModel(i_s, i_U_infty, i_Delta, i_k, i_Dia, i_Nx,&
              i_Ny)
     end do
-!    write(*,*) 'size of ens du (hey!): ', size(this%ensemble(1+coord*nproc)%du(1,:)), 'processor: ', coord
 
     ! Allocate filter matrices
     this%Nm = this%wm%N                              ! Number of measurements
@@ -1150,8 +1266,6 @@ subroutine initialize_file(this, fpath, i_sigma_du, i_sigma_k, i_sigma_Phat, i_t
         call string_splice( fstring, fpath // '/ensemble_', i+coord*this%Ne, '.dat' )
         this%ensemble(i+coord*this%Ne) = WakeModel(fstring)
     end do
-
-!    write(*,*) 'size of ens du: ', size(this%ensemble(1+coord*nproc)%du(1,:)), 'processor: ', coord
 
 end subroutine initialize_file
 
@@ -1239,7 +1353,6 @@ subroutine generateInitialEnsemble(this, Ctp, Pm)
     this%wm%U_infty = sum(this%wm%yu_inf) / size(this%wm%yu_inf)
     
 
-!write(*,*) 'Heyy 2!'
     ! Do 1 FFT of k's
     do i = 1, this%Ne
         this%ensemble(i+coord*this%Ne)%yu_inf(:) = this%wm%yu_inf
@@ -1265,15 +1378,7 @@ subroutine generateInitialEnsemble(this, Ctp, Pm)
                     + sqrt(dt) * this%sigma_du * random_normal()                   &
                     * this%ensemble(i+coord*this%Ne)%G(j,:) * sqrt(2*pi)                         &
                     * this%ensemble(i+coord*this%Ne)%Delta, 0._rprec)
-!                if (i == 1 .and. j == 1 .and. coord == 0) then
-!                  write(*,*) "Iteration: ", ii,"  Ensemble number: ", i
-!                  write(*,*) "DU ", this%ensemble(i)%du(j,:)
-!                  write(*,*) 'Added term: ', sqrt(dt) * this%sigma_du *            &
-!                       random_normal() * this%ensemble(i)%G(j,:) * sqrt(2*pi)      &
-!                    * this%ensemble(i)%Delta
-!                endif 
            end do
-!            write(*,*) "", this%ensemble(i)
             call this%ensemble(i+coord*this%Ne)%advance(Ctp, dt)
         end do
         call this%wm%advance(Ctp, dt)
@@ -1313,9 +1418,7 @@ subroutine generateInitialEnsemble(this, Ctp, Pm)
         this%Ahatprime(:,i) = this%Ahat(:,i) - this%Ahatbar
     end do
 
-!  write(*,*) 'Heyy 6!'
 !  if (coord == 0)
-
 
      write(*,*) "Done generating initial ensemble"
   endif
@@ -1335,7 +1438,6 @@ subroutine advance(this, dt, Pm, Ctp)
     real(rprec)                                 :: Uinftyi, alpha
     real(rprec), dimension(:), allocatable      :: yu_turb, yu_temp, ylocs_sort
 
-!    write(*,*) 'size of ens du: ', size(this%ensemble(1+coord*nproc)%du(1,:)), 'processor: ', coord
 
     N = this%wm%N
     Nx = this%wm%Nx
@@ -1343,7 +1445,7 @@ subroutine advance(this, dt, Pm, Ctp)
     allocate( yu_turb(this%wm%nfree) )
     allocate( ylocs_sort(this%wm%nfree) )
     allocate( yu_temp(this%wm%Ny) )
-
+    
     if (size(Pm) /= N ) then
         call error('WakeModelEstimator.advance','Pm must be of size N')
     end if
@@ -1445,8 +1547,6 @@ subroutine advance(this, dt, Pm, Ctp)
     ! Advance ensemble and mean estimate
     call this%advanceEnsemble(Ctp, dt)
 
-
-
     ! Place ensemble into a matrix with each member in a column
     this%A = 0._rprec
     this%Ahat = 0._rprec
@@ -1509,6 +1609,7 @@ subroutine advanceEnsemble(this, Ctp, dt)
     call this%wm%computeWakeExpansionFunctions
     call this%wm%compute2Dwakes
     call this%wm%woketurbines
+    call this%wm%compute_wake_disks
     call this%wm%advance(Ctp, dt)
 
 end subroutine advanceEnsemble
