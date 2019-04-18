@@ -1604,6 +1604,7 @@ subroutine advanceEnsemble(this, Ctp, dt)
         call this%ensemble(i+coord*this%Ne)%computeWakeExpansionFunctions
         call this%ensemble(i+coord*this%Ne)%compute2Dwakes
         call this%ensemble(i+coord*this%Ne)%wokeTurbines
+        call this%ensemble(i+coord*this%Ne)%compute_wake_disks
         call this%ensemble(i+coord*this%Ne)%advance(Ctp, dt)
     end do
     call this%wm%computeWakeExpansionFunctions
