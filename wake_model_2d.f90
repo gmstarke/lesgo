@@ -56,17 +56,19 @@ type wake_model_base
     real(rprec) :: dz      = 0                         ! delta in vertical direction
     integer     :: Nx      = 0                         ! Number of streamwise points
     integer     :: Ny      = 0                         ! Number of spanwise points
-    integer     :: dNy     = 32                        ! Number of spanwise cells in turbine disk
-    integer     :: dNz     = 32                        ! Number of vertical cells in turbine disk
+    integer     :: dNy     = 16                        ! Number of spanwise cells in turbine disk
+    integer     :: dNz     = 16                        ! Number of vertical cells in turbine disk
     integer     :: N       = 0                         ! Number of turbines
     integer     :: nfree   = 0                         ! Number of un-waked turb
     real(rprec) :: sigma_o = 0  
     integer, dimension(:), allocatable       :: wake_num
     integer, dimension(:), allocatable       :: free_turbines
+    integer, dimension(:), allocatable       :: turb_i
     integer, dimension(:,:), allocatable     :: Cx
     integer, dimension(:,:), allocatable     :: px 
     integer, dimension(:,:), allocatable     :: ymin   ! Wake boundary vector L
     integer, dimension(:,:), allocatable     :: ymax   ! Wake boundary vector U
+    integer, dimension(:,:), allocatable     :: d_fil  ! filter for the disks
     logical     :: isDimensionless = .false.
     real(rprec) :: LENGTH=0, VELOCITY=0, TIME=0, FORCE=0
 contains
@@ -77,6 +79,7 @@ contains
     procedure, public :: computeGaussians
     procedure, public :: computeWakeExpansionFunctions
     procedure, public :: compute2Dwakes
+    procedure, public :: sort_wake_disks
     procedure, public :: compute_wake_disks
     procedure, public :: woketurbines
 end type wake_model_base
@@ -130,6 +133,7 @@ allocate( this%y(this%Ny) )
 allocate( this%z(this%dNz) )
 allocate( this%yu_inf(this%Ny) )
 allocate( this%wake_num(this%N) )
+allocate( this%turb_i(this%N) )
 allocate( this%ymin(this%N, this%Nx) )
 allocate( this%ymax(this%N, this%Nx) )
 allocate( this%G(this%N,  this%Nx) )
@@ -138,6 +142,7 @@ allocate( this%d(this%N,  this%Nx) )
 allocate( this%dp(this%N, this%Nx) )
 allocate( this%w(this%N,  this%Nx) )
 allocate( this%fp(this%N, this%Nx) )
+allocate( this%d_fil(this%N, this%N) )
 allocate( this%disk(this%N, this%dNy, this%dNz) )
 allocate( this%diskw(this%N, this%N, this%dNy, this%dNz) )
 allocate( this%Cx(this%N, this%Nx) )
@@ -177,9 +182,12 @@ do i = 2, this%dNz
     this%z(i) = this%z(i-1) + this%dz
 end do
 
+this%d_fil = 0
+
 call this%computeGaussians
 call this%computeWakeExpansionFunctions
 call this%compute2Dwakes
+call this%sort_wake_disks
 call this%compute_wake_disks
 call this%woketurbines
 
@@ -286,15 +294,19 @@ end do
 
 end subroutine compute2Dwakes
 
+
 !*******************************************************************************
-subroutine compute_wake_disks(this)
+subroutine sort_wake_disks(this)
 !*******************************************************************************
     use functions, only: linear_interp
 implicit none
 class(wake_model_base), intent(inout)  :: this
-integer                                :: i, j, k, m
+integer                                :: i, j, k, m, l
 real(rprec)                            :: cell_size, hcs, c_z, c_y, center, dist
 real(rprec)                            :: ci, pix, rn, dc
+real(rprec), dimension(:), allocatable :: k_temp
+real(rprec), dimension(:,:), allocatable :: d_temp
+
 
 cell_size = (this%Dia) / this%dNy
 hcs = cell_size/2
@@ -318,8 +330,18 @@ enddo
 
 c_y = 0
 c_z = 0
+allocate(k_temp(this%N))
+allocate( d_temp(this%N,  this%Nx) )
+k_temp = 0.25
+
+
+do i = 1, this%N
+    d_temp(i,:)  = 1.0 + k_temp(i) * softplus(2.0 *                            &
+        (this%s(i,1))/this%Dia, 2.0*this%x/this%Dia)
+end do
 
 do i =1, this%N
+   l = 0
    this%disk(i,:,:) = this%disk(1,:,:)
 !   pi = 2 * (1 + (this%Dia / 0.002))
 !   ci = (pi/(2 * gamma(2/pi)))*(((this%Dia**2)/(8*this%sigma_o**2))**(2/pi))
@@ -328,12 +350,62 @@ do i =1, this%N
        pix = 2 * (1 + (this%Dia / max((this%s(m,1)-this%s(i,1)),0.02)))
        ci = (pix/(2 * gamma(2/pix)))*(((this%Dia**2)/(8*this%sigma_o**2))**(2/pix))
        c_y = this%s(m,2) - center + hcs
-       dc = linear_interp(this%x,this%d(i,:),this%s(m,1))
+       dc = linear_interp(this%x,d_temp(i,:),this%s(m,1))
        do j = 1, this%dNy
            c_z = this%s(m,3) - center + hcs
            do k = 1, this%dNz
                rn = sqrt((c_y-this%s(i,2))**2 + (c_z-this%s(i,3))**2)
                this%diskw(i,m,j,k) = ci * exp(-(this%Dia**2)/(8*this%sigma_o**2)*     &
+                    ((((2*rn)/(this%Dia * dc)) )**pix))
+               c_z = c_z + cell_size
+          enddo
+          c_y = c_y + cell_size
+       enddo
+       if (sum(sum(this%diskw(i,m,:,:),1)) > 100) then
+          l = l+1
+          this%d_fil(i,l) = m
+       else
+       endif
+!       write(*,*) 'i', i, 'm', m, 'sum', sum(sum(this%diskw(i,m,:,:),1))
+   enddo
+   this%turb_i(i) = l
+end do
+
+!*******************************************************************************
+end subroutine sort_wake_disks
+!*******************************************************************************
+
+!*******************************************************************************
+subroutine compute_wake_disks(this)
+!*******************************************************************************
+    use functions, only: linear_interp
+implicit none
+class(wake_model_base), intent(inout)  :: this
+integer                                :: i, j, k, m, num 
+real(rprec)                            :: cell_size, hcs, c_z, c_y, center, dist
+real(rprec)                            :: ci, pix, rn, dc
+
+cell_size = (this%Dia) / this%dNy
+hcs = cell_size/2
+c_z = hcs
+c_y = hcs
+center = (this%Dia) / 2
+
+c_y = 0
+c_z = 0
+
+do i =1, this%N
+   do m = 1, this%turb_i(i)
+       num = this%d_fil(i,m)
+       pix = 2 * (1 + (this%Dia / max((this%s(num,1)-this%s(i,1)),0.02)))
+       ci = (pix/(2 * gamma(2/pix)))*(((this%Dia**2)/(8*this%sigma_o**2))**(2/pix))
+       c_y = this%s(num,2) - center + hcs
+       dc = linear_interp(this%x,this%d(i,:),this%s(num,1))
+       do j = 1, this%dNy
+           c_z = this%s(num,3) - center + hcs
+           do k = 1, this%dNz
+               rn = sqrt((c_y-this%s(i,2))**2 + (c_z-this%s(i,3))**2)
+               this%diskw(i,num,j,k) = ci * exp(-(this%Dia**2)/(8*this%sigma_o**2)*     &
                     ((((2*rn)/(this%Dia * dc)) )**pix))
                c_z = c_z + cell_size
           enddo
@@ -345,6 +417,7 @@ end do
 end subroutine compute_wake_disks
 !*********************************************************************************
 
+!*********************************************************************************
 ! Find turbines not waked by other turbines
 subroutine woketurbines(this)
     implicit none
@@ -620,6 +693,7 @@ subroutine initialize_file(this, fstring)
     allocate( this%k(this%N)    )
     allocate( this%uhat(this%N) )
     allocate( this%wake_num(this%N) )
+    allocate( this%turb_i(this%N) )
     allocate( this%Phat(this%N) )
     allocate( this%Ctp(this%N)  )
     allocate( this%x(this%Nx) )
@@ -636,6 +710,7 @@ subroutine initialize_file(this, fstring)
     allocate( this%w(this%N,  this%Nx) )
     allocate( this%fp(this%N, this%Nx) )
     allocate( this%du(this%N, this%Nx) )
+    allocate( this%d_fil(this%N, this%N) )
     allocate( this%disk(this%N, this%dNy, this%dNz) )
     allocate( this%diskw(this%N, this%N, this%dNy, this%dNz) )
 !    allocate( this%Wf(this%N, this%Nx, this%Ny, this%dNz) )
@@ -657,6 +732,7 @@ subroutine initialize_file(this, fstring)
     call this%computeGaussians
     call this%computeWakeExpansionFunctions
     call this%compute2Dwakes
+    call this%sort_wake_disks
     call this%compute_wake_disks
     call this%woketurbines
 
@@ -762,7 +838,7 @@ subroutine advance(this, Ctp, dt)
     class(WakeModel), intent(inout)          :: this
     real(rprec), intent(in)                  :: dt
     real(rprec), dimension(:), intent(in)    :: Ctp
-    integer                                  :: i, j
+    integer                                  :: i, j,num
     real(rprec)                              :: diff, a1, a2, du_loop
     real(rprec), dimension(:,:,:), allocatable :: new_ui
     real(rprec), dimension(:,:,:), allocatable :: du_sum, u_field
@@ -788,9 +864,10 @@ subroutine advance(this, Ctp, dt)
     allocate( u_field( this%N, this%dNy, this%dNz) )
     du_sum = 0._rprec
     do i = 1, this%N
-       do j = 1, this%N
-           du_loop = linear_interp(this%x,this%du(j,:),this%s(i,1))
-           du_sum(i,:,:) = du_sum(i,:,:) + du_loop * this%diskw(j,i,:,:)
+       do j = 1, this%turb_i(i)
+           num = this%d_fil(i,j)
+           du_loop = linear_interp(this%x,this%du(num,:),this%s(i,1))
+           du_sum(i,:,:) = du_sum(i,:,:) + du_loop * this%diskw(num,i,:,:)
 !            du_superimposed(j,this%ymin(i,j):this%ymax(i,j)) =                 &
 !                du_superimposed(j,this%ymin(i,j):this%ymax(i,j))               &
 !                +this%du(i,j)**2
