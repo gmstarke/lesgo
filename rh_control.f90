@@ -43,6 +43,8 @@ type, extends(Minimized) :: MinimizedFarm
     real(rprec)                                  :: cost = 0._rprec    ! cost
     ! Gradient is indexed with time, but only 2:end counts since Ctp is fixed at 1
     real(rprec), dimension(:,:), allocatable     :: grad    ! gradient (turbine, time)
+    real(rprec), dimension(:,:), allocatable     :: a_grad  ! source term a gradient (turbine, time)
+    real(rprec), dimension(:,:), allocatable     :: b_grad  ! source term b gradient (turbine, time)
     real(rprec), dimension(:,:), allocatable     :: fdgrad  ! finite-difference gradient (turbine, time)
     real(rprec) :: Ctp0 = 1.33_rprec
     real(rprec) :: POWER = 0._rprec
@@ -122,6 +124,8 @@ subroutine initialize(this, i_wm, i_t0, i_T, i_cfl, i_time, i_Pref, i_tau)
     allocate( this%Ctp(this%N, this%Nt)    )
     allocate( this%phi(this%N, this%Nt)    )
     allocate( this%grad(this%N, this%Nt)   )
+    allocate( this%a_grad(this%N, this%Nt) )
+    allocate( this%b_grad(this%N, this%Nt) )
     allocate( this%fdgrad(this%N, this%Nt) )
 
     ! Put state of wake model Ctp into first array
@@ -148,6 +152,7 @@ subroutine run_input(this, i_t, i_phi)
     end do
 
     call this%run_noinput
+
 end subroutine run_input
 
 subroutine run_noinput(this)
@@ -158,15 +163,18 @@ subroutine run_noinput(this)
     real(rprec), dimension(:), allocatable     :: uhatstar
     real(rprec), dimension(:,:), allocatable   :: du_super, ustar
     real(rprec), dimension(:,:,:), allocatable :: fstar
-    real(rprec), dimension(:,:), allocatable   :: phistar
+    real(rprec), dimension(:,:), allocatable   :: phistar, source_ctp_cost, part_grad
     real(rprec), dimension(:), allocatable     :: g
 
+
     ! Allocate some variables
-    allocate( du_super(this%w%Nx, this%w%Ny) )
-    allocate( uhatstar(this%N) )
-    allocate( ustar(this%w%Nx, this%w%Ny) )
-    allocate( fstar(this%N, this%Nt, this%w%Nx) )
-    allocate( phistar(this%N, this%Nt) )
+    allocate( du_super(this%w%Nx, this%w%Ny) )     ! Upper part of forcing for WM adjoint
+    allocate( uhatstar(this%N) )                   ! u_dn - adjoint variable for local velocity at turbine
+    allocate( ustar(this%w%Nx, this%w%Ny) )        ! Lower part of forcing for WM adjoint
+    allocate( fstar(this%N, this%Nt, this%w%Nx) )  ! New forcing for WM adjoints
+    allocate( phistar(this%N, this%Nt) )           ! Source terms for Ctp_star adjoint variable
+    allocate( source_ctp_cost(this%N, this%Nt) )   ! Source terms for Ctp_star adjoint variable from cost function
+    allocate( part_grad(this%N, this%Nt) )
 
     ! Make dimensionless
     call this%makeDimensionless
@@ -174,7 +182,10 @@ subroutine run_noinput(this)
     ! Reset cost and gradient
     this%cost = 0._rprec
     this%grad = 0._rprec
+    this%a_grad = 0._rprec
+    this%b_grad = 0._rprec
     this%Pfarm = 0._rprec
+    phistar = 0._rprec
     fstar = 0._rprec
 
     ! Assign initial conditions
@@ -196,6 +207,7 @@ subroutine run_noinput(this)
 
         ! Calculate next step
         call this%w%advance(this%Ctp(:,k), this%dt)
+!         call this%w%advance(Ctp_const, this%dt)
 
         ! Calculate farm power
         this%Pfarm(k) = sum(this%w%Phat)
@@ -205,7 +217,9 @@ subroutine run_noinput(this)
 
         ! Calculate the contribution dJ/dCt'_n to phistar at time k
         do n = 1, this%N
-            phistar(n, k) = 2._rprec * (this%Pfarm(k) - this%Pref(k))          &
+!            phistar(n, k) = 2._rprec * (this%Pfarm(k) - this%Pref(k))          &
+!                * this%w%uhat(n)**3 * this%dt
+            source_ctp_cost(n, k) = 2._rprec * (this%Pfarm(k) - this%Pref(k))          &
                 * this%w%uhat(n)**3 * this%dt
         end do
 
@@ -217,7 +231,7 @@ subroutine run_noinput(this)
             do i = this%w%Gstart(n), this%w%Gstop(n)
                 ustar(i,this%w%ymin(n,1):this%w%ymax(n,1)) =                   &
                     ustar(i,this%w%ymin(n,1):this%w%ymax(n,1)) + this%w%G(n,i) &
-                    * uhatstar(n) / (this%w%ymax(n,1) - this%w%ymin(n,1) + 1)
+                    * uhatstar(n)
             end do
         end do
         du_super = 0._rprec
@@ -228,8 +242,9 @@ subroutine run_noinput(this)
         do n = 1, this%N
             do i = 1, this%w%Nx
                 do j = this%w%ymin(n,i), this%w%ymax(n,i)
-                    fstar(n, k, i) = fstar(n, k, i) - this%w%du(n,i)           &
-                        * du_super(i,j) * ustar(i,j)
+                    fstar(n, k, i) = fstar(n, k, i) - (this%w%du(n,i)           &
+                        * du_super(i,j) * ustar(i,j)) / (this%w%ymax(n,i) -      &
+                        this%w%ymin(n,i) + 1)
                 end do
             end do
         end do
@@ -240,10 +255,17 @@ subroutine run_noinput(this)
     ! Backward (Adjoint) Simulation
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     allocate( g(this%N) )
+
     do k = this%Nt-1, 1, -1
         ! Integrate Ctstar (which is held in grad)
         do n = 1, this%N
-            this%grad(n, k) = this%grad(n, k+1) - this%dt * ( this%grad(n, k+1) / this%tau + phistar(n, k+1) )
+!            this%grad(n, k) = this%grad(n, k+1) - this%dt * ( this%grad(n, k+1) / this%tau + phistar(n, k+1) )
+            this%grad(n, k) = this%grad(n, k+1) - this%dt * ( this%grad(n, k+1) / this%tau &
+            + phistar(n, k+1) + source_ctp_cost(n, k+1) )
+            this%a_grad(n, k) = this%a_grad(n, k+1) - this%dt * (this%a_grad(n, k+1) / this%tau &
+            + source_ctp_cost(n, k+1))
+            this%b_grad(n, k) = this%b_grad(n, k+1) - this%dt * (this%b_grad(n, k+1) / this%tau &
+            + phistar(n, k+1))
         end do
 
         ! Integrate adjoint wake model
@@ -252,13 +274,17 @@ subroutine run_noinput(this)
 
         ! Add additional term to phistar
         do n = 1, this%N
-            phistar(n, k) = phistar(n, k) - g(n) * 8.d0 * this%w%U_infty**2 &
+            phistar(n, k) =  - g(n) * 8.d0 * this%w%U_infty**2 &
             / ( ( 4.d0 + this%Ctp(n,k))**2 )
+!            phistar(n, k) = phistar(n, k) - g(n) * 8.d0 * this%w%U_infty**2 &
+!            / ( ( 4.d0 + this%Ctp(n,k))**2 )
         end do
     end do
 
     ! Multiply Ctstar to get gradient
     this%grad = -this%grad / this%tau
+    this%a_grad = -this%a_grad / this%tau
+    this%b_grad = -this%b_grad / this%tau
 
 end subroutine run_noinput
 
