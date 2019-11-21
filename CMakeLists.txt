@@ -6,54 +6,32 @@ cmake_minimum_required(VERSION 2.8.9)
 
 # Specify Compiler
 # Options: Intel and GNU
-set(CMAKE_Fortran_COMPILER_ID "GNU")
+set(CMAKE_Fortran_COMPILER_ID "Intel")
 
 # Set the name of the computer you are compiling on.
 # Supported computers: panoramix, njord, marcc, darwin-brew
 # Otherwise, default settings are used
-set(hostname "default")
-
-# Set extra safety measures 
-set(USE_SAFETYMODE true)
-
-# Output additional quantities to file. May be useful
-# for diagnosing issues
-set(OUTPUT_EXTRA false)
-
-# Enable parallelization support
-set(USE_MPI true)
+set(hostname "marcc")
 
 # Read and write binary files as big_endian or little_endian
 # Options: DEFAULT, LITTLE, or BIG
 set(WRITE_ENDIAN "DEFAULT")
 set(READ_ENDIAN "DEFAULT")
 
-# Select a turbine model
-# USE_TURBINE: Actuator Disk Model without Rotation
-# USE_ATM: Actuator Line/Sector Model 
-set(USE_TURBINES true)
-set(USE_ATM false)
+# Options to enable various features in the code
+option(USE_MPI "Enable parallelization support." ON)
+option(USE_CPS "Enable concurrent precursor simulations." OFF)
+option(USE_HIT "Enable homogeneous isotropic turbulence input." OFF)
+option(USE_STREAKS "Shift the domain in the y (spanwise) direction to eliminate streaks effects on averaging." OFF)
+option(USE_LVLSET "Enable level set." OFF)
+option(USE_TURBINES "Enable actuator disk model without rotation." ON)
+option(USE_ATM "Enable actuator line/section model" OFF)
+option(USE_DYN_TN "Dynamically update T, the timescale for Lagrangian averaging, using Taylor timescale." OFF)
+option(USE_SAFETYMODE "Set extra safety measures." ON)
+option(USE_CGNS "Enable CGNS data output." OFF)
 
-# Select the data output
-set(USE_CGNS false)
-
-# Select level set
-set(USE_LVLSET false)
-
-# Concurrent precursor simulation 
-# Requires configuration of two builds: upstream and downstream
-set(USE_CPS true)
-
-# Homogeneous isotropic turbulence input
-set(USE_HIT false)
-
-# Shift the domain in the y (spanwise) direction to eliminate
-# streaks effects on averaging
-set(USE_STREAKS false)
-
-# Dynamically update T, the timescale for Lagrangian averaging, using Taylor 
-# timescale
-set(USE_DYN_TN false)
+# Enable verbose mode
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
 ################################################################################
 #                         Set up build (do not change)
@@ -61,12 +39,9 @@ set(USE_DYN_TN false)
 # Set compiler versions for Cmake
 #  Intel
 if (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-    add_definitions(-DPPIFORT)
     set(compiler_name "ifort")
-    add_definitions(-DPPIFORT)
 #  GNU
 elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
-    add_definitions(-DPPGFORTRAN)
     set(compiler_name "gfortran")
 endif ()
 find_program(WHICH NAMES which)
@@ -79,35 +54,49 @@ project (lesgo)
 set(exec_name "lesgo")
 
 # Library links
-link_libraries(fftw3)    
+if (${hostname} STREQUAL "marcc")
+    if (${CMAKE_Fortran_COMPILER_ID} STREQUAL "Intel")
+        set(CMAKE_Fortran_FLAGS ${CMAKE_Fortran_FLAGS} -mkl)
+	link_libraries(mkl_lapack95_lp64 mkl_blas95_lp64)
+    else()
+        link_libraries(fftw3)
+    endif()
+else()
+    link_libraries(fftw3)
+endif()
 
 # Common include and link directories
 include_directories(/usr/local/include)
 link_directories(/usr/local/lib)
 if ( NOT(${hostname} STREQUAL "darwin-brew") )
-    include_directories($ENV{HOME}/include /usr/include)
+    # include_directories($ENV{HOME}/include /usr/include)
+    include_directories(/usr/include)
     link_directories($ENV{HOME}/lib /usr/lib64)
 endif ()
 
 # Include host-specific paths
 #  panoramix
 if (${hostname} STREQUAL "panoramix")
-    include_directories(/opt/cgns-3.2.1-hdf5-mpi/include 
-    /opt/hdf5-1.8.12-mpi/include /usr/local/hdf5/include /usr/local/cgns/include 
-    /act/fftw3/mpich/gcc-4.7.2/include /act/hdf5-1.8.15/mpich/gcc-4.7.2/include 
+    include_directories(/opt/cgns-3.2.1-hdf5-mpi/include
+    /opt/hdf5-1.8.12-mpi/include /usr/local/hdf5/include /usr/local/cgns/include
+    /act/fftw3/mpich/gcc-4.7.2/include /act/hdf5-1.8.15/mpich/gcc-4.7.2/include
     /act/cgns-3.3.0/mpich/gcc-4.7.2/include)
-    link_directories(/opt/hdf5-1.8.12-mpi/lib  /opt/cgns-3.2.1-hdf5-mpi/lib 
-    /usr/local/hdf5/lib  /usr/local/cgns/lib /act/fftw3/mpich/gcc-4.7.2/lib 
+    link_directories(/opt/hdf5-1.8.12-mpi/lib  /opt/cgns-3.2.1-hdf5-mpi/lib
+    /usr/local/hdf5/lib  /usr/local/cgns/lib /act/fftw3/mpich/gcc-4.7.2/lib
     /act/hdf5-1.8.15/mpich/gcc-4.7.2/lib /act/cgns-3.3.0/mpich/gcc-4.7.2/lib)
 #  marcc
 elseif (${hostname} STREQUAL "marcc")
     # Intel
+
     if (${CMAKE_Fortran_COMPILER_ID} STREQUAL "Intel")
-        include_directories(/cm/shared/apps/Intel/fftw/3.3.4/include)
-        link_directories(/cm/shared/apps/Intel/fftw/3.3.4/lib
-        /cm/shared/apps/blas/3.2.1/lib /cm/shared/apps/Intel/lapack/3.3.0/lib)
+#        include_directories(/cm/shared/apps/Intel/fftw/3.3.4/include /cm/shared/apps/Intel/parallel_studio_update_1_2017/mkl/include/intel64/lp64)
+#        link_directories(/cm/shared/apps/Intel/fftw/3.3.4/lib /cm/shared/apps/blas/3.2.1/lib /cm/shared/apps/Intel/lapack/3.3.0/lib /cm/shared/apps/Intel/parallel_studio_update_1_2017/mkl/lib/intel64 /cm/shared/apps/Intel/parallel_studio_update_1_2017/mkl/lib/intel64_lin)    
+    include_directories(/software/apps/compilers/intel/mkl/include/fftw/ /software/apps/compilers/intel/mkl/include/)
+        link_directories(/software/apps/compilers/intel/mkl/lib/intel64/)
     # GNU -- These have to be installed locally for now.
     elseif (${CMAKE_Fortran_COMPILER_ID} STREQUAL "GNU")
+        include_directories(/software/apps/fftw3/3.3.8/gcc/5.5.0/include/)
+        link_directories(/software/apps/fftw3/3.3.8/gcc/5.5.0/lib/)
         if (USE_CGNS)
             include_directories($ENV{HOME}/cgns/include/)
             link_directories($ENV{HOME}/hdf5/lib/ $ENV{HOME}/cgns/lib/)
@@ -118,8 +107,8 @@ elseif (${hostname} STREQUAL "njord")
     # nothing yet, but can add if needed
 #  all other systems
 elseif (${hostname} STREQUAL "default")
-    include_directories($ENV{HOME}/codes/fftw3/include)
-    link_directories($ENV{HOME}/codes/fftw3/lib)
+    # include_directories($ENV{HOME}/codes/fftw3/include)
+    # link_directories($ENV{HOME}/codes/fftw3/lib)
     # nothing yet, but can add if needed
     if (USE_CGNS)
         include_directories($ENV{HOME}/cgns/include/)
@@ -129,30 +118,28 @@ endif ()
 
 # List common sources
 set (Sources cfl_util.f90 clocks.f90 convec.f90 derivatives.f90 divstress_uv.f90
-     divstress_w.f90 emul_complex.f90 fft.f90 finalize.f90 
+     divstress_w.f90 emul_complex.f90 fft.f90 finalize.f90
      forcing.f90 fringe_util.f90 functions.f90 grid.f90
-     initial.f90 initialize.f90 input_util.f90 interpolag_Sdep.f90 
-     interpolag_Ssim.f90 io.f90 lagrange_Sdep.f90 lagrange_Ssim.f90 main.f90 
-     messages.f90 open_file.f90 param.f90 param_output.f90 
-     press_stag_array.f90 rmsdiv.f90 scaledep_dynamic.f90 
-     sgs_param.f90 sgs_stag_util.f90 sim_param.f90 stat_defs.f90 
-     std_dynamic.f90 string_util.f90 test_filtermodule.f90 tridag_array.f90 
+     initial.f90 initialize.f90 input_util.f90 interpolag_Sdep.f90
+     interpolag_Ssim.f90 io.f90 lagrange_Sdep.f90 lagrange_Ssim.f90 main.f90
+     messages.f90 open_file.f90 param.f90 param_output.f90
+     press_stag_array.f90 rmsdiv.f90 scaledep_dynamic.f90
+     sgs_param.f90 sgs_stag_util.f90 sim_param.f90 stat_defs.f90
+     std_dynamic.f90 string_util.f90 test_filtermodule.f90 tridag_array.f90
      types.f90 wallstress.f90 init_random_seed.f90
      iwmles.f90)
-
-link_libraries(lapack blas)
 
 if (USE_MPI)
     add_definitions(-DPPMPI)
     set (CMAKE_Fortran_COMPILER mpif90)
     set(Sources ${Sources} mpi_transpose_mod.f90 mpi_defs.f90)
-    set(exec_name "${exec_name}-mpi")
+    set(exec_name "${exec_name}")
 endif (USE_MPI)
 
 if (USE_CPS)
     add_definitions(-DPPCPS)
     set(Sources ${Sources} concurrent_precursor.f90)
-    set(exec_name "${exec_name}-cps")
+    set(exec_name "${exec_name}")
 endif (USE_CPS)
 
 if (USE_HIT)
@@ -168,22 +155,21 @@ endif (USE_STREAKS)
 
 if (USE_LVLSET)
     add_definitions(-DPPLVLSET)
-    set(Sources ${Sources} level_set_base.f90 level_set.f90 linear_simple.f90 
-        trees_pre_ls.f90 trees_base_ls.f90 trees_setup_ls.f90 trees_io_ls.f90 
+    set(Sources ${Sources} level_set_base.f90 level_set.f90 linear_simple.f90
+        trees_pre_ls.f90 trees_base_ls.f90 trees_setup_ls.f90 trees_io_ls.f90
         trees_global_fmask_ls.f90)
     set(exec_name "${exec_name}-ls")
 endif (USE_LVLSET)
 
 if (USE_TURBINES)
     add_definitions(-DPPTURBINES)
-    set(Sources ${Sources} turbines.f90 util.f90 wake_model.f90
-        minimize.f90 rh_control.f90 lbfgsb.f timer.f linpack.f)
-    set(exec_name "${exec_name}-turbines")
+    set(Sources ${Sources} turbines.f90 util.f90 wake_model.f90 minimize.f90 rh_control.f90 lbfgsb.f timer.f linpack.f)
+    set(exec_name "${exec_name}-1d-uniform")
 endif (USE_TURBINES)
 
 if (USE_ATM)
     add_definitions(-DPPATM)
-    set(Sources ${Sources} atm_base.f90 atm_input_util.f90 
+    set(Sources ${Sources} atm_base.f90 atm_input_util.f90
         actuator_turbine_model.f90 atm_lesgo_interface.f90)
     set(exec_name "${exec_name}-ATM")
 endif (USE_ATM)
@@ -206,8 +192,8 @@ endif (USE_SAFETYMODE)
 
 if (USE_CGNS)
     add_definitions(-DPPCGNS)
-    link_libraries(cgns hdf5)   
-    set(exec_name "${exec_name}-cgns") 
+    link_libraries(cgns hdf5)
+    set(exec_name "${exec_name}-cgns")
 endif (USE_CGNS)
 
 if (WRITE_ENDIAN STREQUAL "LITTLE")
@@ -226,18 +212,15 @@ if (READ_ENDIAN STREQUAL "BIG")
     add_definitions(-DPPREAD_BIG_ENDIAN)
 endif (READ_ENDIAN STREQUAL "BIG")
 
-set(CMAKE_Fortran_FLAGS "-cpp -O2")
 # Intel
 if (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-    set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -funroll-loops -no-wrap-margin -assume byterecl")
+    set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -O0 -g -traceback -funroll-loops -no-wrap-margin -assume byterecl")
+    #set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -O0 -g -traceback -check bounds -no-wrap-margin -assume byterecl")
 # GNU
 else (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-    set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -ffast-math -funroll-loops -fall-intrinsics -fexternal-blas -Wall")
+    set (CMAKE_Fortran_FLAGS "-cpp -O2 -ffast-math -funroll-loops -fall-intrinsics -Wall -fcheck=all -fbacktrace")
+    #set (CMAKE_Fortran_FLAGS "-cpp -O0 -g -fbacktrace -fall-intrinsics -Wall -fcheck=all")
 endif (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-if (hostname STREQUAL "darwin-brew")
-    set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -framework Accelerate ")
-endif (hostname STREQUAL "darwin-brew")
 
 # main lesgo executable
 add_executable(${exec_name} ${Sources})
-
